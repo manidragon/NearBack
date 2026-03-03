@@ -1,0 +1,6 @@
+# D:\Mani\Code with Zosh\Backup\source code\backend\.gitignore
+node_modules/
+
+# Environment variables
+.env
+

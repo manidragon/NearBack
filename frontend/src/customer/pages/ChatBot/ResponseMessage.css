@@ -1,0 +1,28 @@
+.response-message {
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 8px;
+  max-width: 80%;
+  font-size: 1rem;
+}
+
+.response-message h1,
+.response-message h2,
+.response-message h3 {
+  margin: 0.5em 0 0.2em 0;
+  font-weight: bold;
+}
+
+.response-message ul {
+  margin: 0.5em 0 0.5em 1.5em;
+  padding-left: 1.2em;
+}
+
+.response-message li {
+  margin-bottom: 0.3em;
+}
+
+.response-message strong {
+  font-weight: bold;
+} 
