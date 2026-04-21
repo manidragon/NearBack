@@ -1,42 +1,43 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Seller\sellerProductSlice.ts
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
-import { api } from '../../Config/Api';
+import { api } from '../../Config/Api';  // ✅ Use existing api instance
 import { type Product } from '../../types/productTypes';
 
 const API_URL = '/api/sellers/product';
 
-// ✅ Product Variant Payload Interface
-export interface ProductVariantPayload {
-  color: string;
-  specifications: Record<string, string | number | boolean>;
+// ✅✅✅ NEW: Offer payload for multi-seller support
+export interface ProductOfferPayload {
+  seller: string;
   mrpPrice: number;
   sellingPrice: number;
   stock: number;
-  images: string[];
   sku?: string;
+  isActive: boolean;
+}
+
+// ✅✅✅ UPDATED: Variant payload with offers array (not direct price fields)
+export interface ProductVariantPayload {
+  color: string;
+  specifications: Record<string, string | number | boolean>;
+  images: string[];
+  offers: ProductOfferPayload[];  // ✅ Array of seller offers (NEW)
   isActive?: boolean;
 }
 
-// ✅ UPDATED: Support both legacy fields AND new variants array
+// ✅ UPDATED: Support both catalog offers AND independent products
 export type ProductCreatePayload = {
-  // ✅ Required core fields
-  title: string;
-  description: string;
-  category: string;  // Level 3 category _id (string)
-  
-  // ✅ NEW: Variants array (primary data for advanced products)
-  variants?: ProductVariantPayload[];
-  
-  // ✅ LEGACY: Optional top-level fields for backward compatibility
-  mrpPrice?: number;
-  sellingPrice?: number;
-  images?: string[];
-  color?: string;
-  sizes?: string;
-  quantity?: number;
-  specifications?: Record<string, string | number | boolean>;
-  
-  // ✅ Optional metadata
+  // ✅ Required for independent products (catalog products skip these)
+  title?: string;
+  description?: string;
+  category?: string;  // Level 3 category _id (string)
+
+  // ✅ Required for ALL products: variants array with offers
+  variants: ProductVariantPayload[];
+
+  // ✅ NEW: Catalog ID - if present, this is a catalog offer (not independent product)
+  catalogId?: string;  // ✅ If set, backend treats this as catalog offer
+
+  // ✅ Optional metadata (only used for independent products)
   brand?: string;
   isActive?: boolean;
 };
@@ -46,7 +47,7 @@ export type ProductUpdatePayload = Partial<ProductCreatePayload> & {
   _id?: string;
 };
 
-// ✅ Fetch seller's products
+// ✅ Fetch seller's products (independent products only)
 export const fetchSellerProducts = createAsyncThunk<Product[], string>(
   'sellerProduct/fetchSellerProducts',
   async (jwt, { rejectWithValue }) => {
@@ -54,11 +55,11 @@ export const fetchSellerProducts = createAsyncThunk<Product[], string>(
       const response = await api.get(API_URL, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
-      
+
       console.log("seller products ", response.data);
-      
+
       let products: Product[] = [];
-      
+
       if (Array.isArray(response.data)) {
         products = response.data;
       } else if (response.data?.products && Array.isArray(response.data.products)) {
@@ -66,9 +67,9 @@ export const fetchSellerProducts = createAsyncThunk<Product[], string>(
       } else if (response.data?.data && Array.isArray(response.data.data)) {
         products = response.data.data;
       }
-      
+
       return products;
-      
+
     } catch (error: any) {
       console.log("error ", error.response);
       return rejectWithValue(error.response?.data || error.message);
@@ -76,25 +77,69 @@ export const fetchSellerProducts = createAsyncThunk<Product[], string>(
   }
 );
 
-// ✅ Create product
+// ✅✅✅ FIXED: Fetch seller's catalog offers (products linked to catalogs)
+export const fetchSellerCatalogOffers = createAsyncThunk<Product[], string>(
+  'sellerProduct/fetchCatalogOffers',
+  async (jwt, { rejectWithValue }) => {
+    try {
+      // ✅ Use API_URL constant to match backend mount point (/api/sellers/product)
+      const response = await api.get(`${API_URL}/catalog-offers`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${jwt}`
+        }
+      });
+
+      // ✅ Handle different response structures
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+      if (response.data?.products && Array.isArray(response.data.products)) {
+        return response.data.products;
+      }
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        return response.data.data;
+      }
+
+      return [];
+    } catch (error: any) {
+      console.error('❌ [Redux] fetchSellerCatalogOffers error:', error);
+      return rejectWithValue(error.response?.data?.message || error.message || 'Failed to fetch catalog offers');
+    }
+  }
+);
+
+// ✅ Create product - Handles both catalog offers AND independent products
 export const createProduct = createAsyncThunk<Product, { request: ProductCreatePayload; jwt: string }>(
   'sellerProduct/createProduct',
   async ({ request, jwt }, { rejectWithValue }) => {
     try {
       const payload = { ...request };
-      
-      if (payload.variants?.length && payload.variants.length > 0 && !payload.mrpPrice) {
-        payload.mrpPrice = payload.variants[0].mrpPrice;
-        payload.sellingPrice = payload.variants[0].sellingPrice;
-        payload.images = payload.variants[0].images;
-        payload.color = payload.variants[0].color;
+
+      // ✅ If this is a catalog offer (catalogId present), only send variants
+      if (payload.catalogId) {
+        // ✅ Catalog offer: only send variants with offers array
+        const offerPayload = {
+          variants: payload.variants
+        };
+
+        // ✅✅✅ FIX: Use singular '/offer' endpoint (not '/offers')
+        const response = await api.post<Product>(
+          `/api/catalog/${payload.catalogId}/offer`,  // ✅ Fixed: singular 'offer'
+          offerPayload,
+          { headers: { Authorization: `Bearer ${jwt}` } }
+        );
+        console.log("catalog offer created ", response.data);
+        return response.data;
       }
-      
+
+      // ✅ Independent product: send full product data with offers array
       const response = await api.post<Product>(API_URL, payload, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
-      console.log("product created ", response.data);
+      console.log("independent product created ", response.data);
       return response.data;
+
     } catch (error: any) {
       console.log("error ", error.response);
       return rejectWithValue(error.response?.data || error.message);
@@ -102,9 +147,9 @@ export const createProduct = createAsyncThunk<Product, { request: ProductCreateP
   }
 );
 
-// ✅ Update product
+// ✅ Update product - Handles both catalog offers AND independent products
 export const updateProduct = createAsyncThunk<
-  Product, 
+  Product,
   { productId: string; product: ProductUpdatePayload }
 >(
   'sellerProduct/updateProduct',
@@ -114,21 +159,33 @@ export const updateProduct = createAsyncThunk<
       if (!jwt) {
         throw new Error('No authentication token found');
       }
-      
+
       const payload = { ...product };
-      
-      if (payload.variants?.length && payload.variants.length > 0 && !payload.mrpPrice) {
-        payload.mrpPrice = payload.variants[0].mrpPrice;
-        payload.sellingPrice = payload.variants[0].sellingPrice;
-        payload.images = payload.variants[0].images;
-        payload.color = payload.variants[0].color;
+
+      // ✅ If updating a catalog-linked product, only allow variant updates
+      if (payload.catalogId) {
+        // ✅ Catalog offer update: only send variants with offers array
+        const offerPayload = {
+          variants: payload.variants
+        };
+
+        // ✅✅✅ FIX: Use singular '/offer' endpoint with offer ID
+        const response = await api.put<Product>(
+          `/api/catalog/${payload.catalogId}/offer/${productId}`,  // ✅ Fixed: singular 'offer'
+          offerPayload,
+          { headers: { Authorization: `Bearer ${jwt}` } }
+        );
+        console.log("catalog offer updated ", response.data);
+        return response.data;
       }
-      
+
+      // ✅ Independent product update: send full product data with offers array
       const response = await api.put<Product>(`${API_URL}/${productId}`, payload, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
-      console.log("update product ", response.data);
+      console.log("independent product updated ", response.data);
       return response.data;
+
     } catch (error: any) {
       console.log("update product error ", error);
       return rejectWithValue(error.response?.data || error.message);
@@ -161,7 +218,7 @@ interface SellerProductState {
   loading: boolean;
   error: string | null;
   productCreated: boolean;
-  productUpdated: boolean; 
+  productUpdated: boolean;
 }
 
 const initialState: SellerProductState = {
@@ -172,41 +229,41 @@ const initialState: SellerProductState = {
   productUpdated: false,
 };
 
-// ✅✅✅ Slice definition - ADD reducers section with reset actions
+// ✅✅✅ Slice definition
 const sellerProductSlice = createSlice({
   name: 'sellerProduct',
   initialState,
-  
-  // ✅✅✅ ADD THIS: Reducers for resetting flags
+
+  // ✅ Reducers for resetting flags
   reducers: {
-    // ✅ Reset productUpdated flag after handling update success
     resetUpdateFlag: (state) => {
       state.productUpdated = false;
     },
-    // ✅ Reset productCreated flag after handling create success
     resetCreateFlag: (state) => {
       state.productCreated = false;
     },
-    // ✅ Reset both flags (optional utility)
     resetProductFlags: (state) => {
       state.productCreated = false;
       state.productUpdated = false;
     },
   },
-  
+
   extraReducers: (builder) => {
     builder
-      // Fetch products
+      // ✅ 1. Fetch independent products (MERGE)
       .addCase(fetchSellerProducts.pending, (state) => {
         state.loading = true;
         state.error = null;
         state.productCreated = false;
-        state.productUpdated = false;  // ✅ Also reset on new fetch
+        state.productUpdated = false;
       })
       .addCase(fetchSellerProducts.fulfilled, (state, action: PayloadAction<Product[]>) => {
-        state.products = action.payload;
+        // ✅ Merge: Add independent products to existing products without duplicates
+        const existingIds = new Set(state.products.map(p => p._id));
+        const newProducts = action.payload.filter(p => !existingIds.has(p._id));
+
+        state.products = [...state.products, ...newProducts];
         state.loading = false;
-        // ✅ Optional: Reset flags after successful fetch
         state.productUpdated = false;
         state.productCreated = false;
       })
@@ -214,8 +271,28 @@ const sellerProductSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string || action.error.message || 'Failed to fetch products';
       })
-      
-      // Create product
+
+      // ✅ 2. Fetch catalog offers (MERGE) - NOTE: Correct action type here!
+      .addCase(fetchSellerCatalogOffers.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchSellerCatalogOffers.fulfilled, (state, action: PayloadAction<Product[]>) => {
+
+        // ✅ Merge: Add catalog offers to existing products without duplicates
+        const existingIds = new Set(state.products.map(p => p._id));
+        const newOffers = action.payload.filter(p => !existingIds.has(p._id));
+
+        state.products = [...state.products, ...newOffers];
+        state.loading = false;
+
+      })
+      .addCase(fetchSellerCatalogOffers.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string || action.error.message || 'Failed to fetch catalog offers';
+      })
+
+      // ✅ 3. Create product
       .addCase(createProduct.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -229,33 +306,37 @@ const sellerProductSlice = createSlice({
           state.products[existingIndex] = action.payload;
         }
         state.loading = false;
-        state.productCreated = true;  // ✅ Set flag to trigger UI feedback
+        state.productCreated = true;
       })
       .addCase(createProduct.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string || action.error.message || 'Failed to create product';
         state.productCreated = false;
       })
-      
-      // Update product
+
+      // ✅ 4. Update product
       .addCase(updateProduct.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
       .addCase(updateProduct.fulfilled, (state, action: PayloadAction<Product>) => {
-        const index = state.products.findIndex(product => product._id === action.payload._id);
-        if (index !== -1) {
-          state.products[index] = action.payload;
-        }
-        state.loading = false;
-        state.productUpdated = true;  // ✅ Set flag to trigger UI feedback
-      })
+  const index = state.products.findIndex(product => product._id === action.payload._id);
+  if (index !== -1) {
+    // ✅ Merge updated product into existing array (preserves other fields)
+    state.products[index] = { ...state.products[index], ...action.payload };
+  } else {
+    // ✅ If not found (e.g., catalog offer), add it
+    state.products.push(action.payload);
+  }
+  state.loading = false;
+  state.productUpdated = true;
+})
       .addCase(updateProduct.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string || action.error.message || 'Failed to update product';
       })
-      
-      // Delete product
+
+      // ✅ 5. Delete product
       .addCase(deleteProduct.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -271,7 +352,7 @@ const sellerProductSlice = createSlice({
   },
 });
 
-// ✅✅✅ EXPORT the new reset actions
+// ✅ Export actions
 export const { resetUpdateFlag, resetCreateFlag, resetProductFlags } = sellerProductSlice.actions;
 
 export default sellerProductSlice.reducer;

@@ -1,578 +1,827 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\seller\pages\Products\AddProductForm.tsx
-import { useFormik, type FormikHelpers } from "formik";
-import * as Yup from "yup";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  TextField,
-  Button,
-  MenuItem,
-  Select,
-  InputLabel,
-  FormControl,
-  FormHelperText,
-  Grid,
-  CircularProgress,
-  IconButton,
-  Snackbar,
-  Alert,
-  Typography,
-  Paper,
-  Step,
-  StepLabel,
-  Stepper,
-  Box,
-  Tabs,
-  Tab,
-  Chip,
-  Divider,
-  Switch,
-  FormControlLabel,
-  Tooltip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-} from "@mui/material";
-import "tailwindcss/tailwind.css";
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
-import CloseIcon from "@mui/icons-material/Close";
-import AddCircleIcon from "@mui/icons-material/AddCircle";
-import RemoveCircleIcon from "@mui/icons-material/RemoveCircle";
-import PaletteIcon from "@mui/icons-material/Palette";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import StorageIcon from "@mui/icons-material/Storage";
-import { useAppDispatch, useAppSelector } from "../../../Redux Toolkit/Store";
-import { createProduct, updateProduct } from "../../../Redux Toolkit/Seller/sellerProductSlice";
-import { uploadToCloudinary } from "../../../util/uploadToCloudnary";
-import { fetchCategories } from "../../../Redux Toolkit/Admin/CategorySlice";
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import type { Category } from "../../../types/categoryTypes";
-import type { CategoryAttribute } from "../../../types/categoryAttributeTypes";
-import { separateAttributesByType } from '../../../types/categoryAttributeTypes';
-import {
-  fetchCategoryAttributes,
-  selectCategoryAttributes,
-  selectCategoryAttributesLoading,
-  clearCategoryAttributes,
-} from "../../../Redux Toolkit/Admin/CategoryAttributeSlice";
+  Stepper, Step, StepLabel, Grid, Button, Snackbar, Alert, Box, Typography, CircularProgress, Chip, TextField
+} from '@mui/material';
+import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
+import { useProductForm } from './hooks/useProductForm';
+import { useCatalogSearch } from './hooks/useCatalogSearch';
+import { CatalogSearchStep } from './components/CatalogSearchStep';
+import { CategoryStep } from './components/CategoryStep';
+import { BasicInfoStep } from './components/BasicInfoStep';
+import { VariantsSection } from './components/VariantsSection';
+import { ReviewStep } from './components/ReviewStep';
+import { createProduct, updateProduct, resetCreateFlag, resetUpdateFlag } from '../../../Redux Toolkit/Seller/sellerProductSlice';
+import { fetchCategories } from '../../../Redux Toolkit/Admin/CategorySlice';
+import type { ProductFormValues, ProductVariantPayload, ProductCreatePayload, ProductUpdatePayload, ProductVariantForm, ProductSubVariantForm, ProductOfferForm } from './types/productFormTypes';
+import type { Category } from '../../../types/categoryTypes';
+import { uploadToCloudinary } from '../../../util/uploadToCloudnary';
 
-// ============================================
-// ✅ TYPE DEFINITIONS
-// ============================================
-export interface ProductSubVariantForm {
-  _id?: string;
-  specifications: Record<string, string | number | boolean>;
-  mrpPrice: string;
-  sellingPrice: string;
-  stock: string;
-  sku?: string;
-  isActive?: boolean;
-  toBeDeleted?: boolean;
-}
 
-export interface ProductVariantForm {
-  _id?: string;
-  color: string;
-  images: string[];
-  subVariants: ProductSubVariantForm[];
-  isActive?: boolean;
-}
+import type { CategoryAttribute } from './types/productFormTypes';
+import { createValidationSchema } from './validation/productValidation';
+import { fetchCategoryAttributes, resetCategoryAttributes } from '../../../Redux Toolkit/Admin/CategoryAttributeSlice';
 
-export interface ProductFormValues {
-  _id?: string;
-  title: string;
-  description: string;
-  images: string[];
-  category: string;
-  category2: string;
-  category3: string;
-  specifications: Record<string, string | number | boolean>;
-  variants: ProductVariantForm[];
-  isActive?: boolean;
-}
-
-// ✅ Default Initial Values
-const defaultInitialValues: ProductFormValues = {
-  title: "",
-  description: "",
-  images: [],
-  category: "",
-  category2: "",
-  category3: "",
-  specifications: {},
-  variants: [],
-  isActive: true,
-};
-
-// ============================================
-// ✅ VALIDATION SCHEMA
-// ============================================
-const validationSchema = Yup.object({
-  category: Yup.string().required("Main category is required"),
-  category2: Yup.string().required("Sub-category is required"),
-  category3: Yup.string().required("Product type is required"),
-  title: Yup.string()
-    .when("category3", {
-      is: (val: string) => !!val,
-      then: (schema) => schema.required("Title is required").min(3, "Title too short"),
-      otherwise: (schema) => schema,
-    }),
-  description: Yup.string()
-    .when("category3", {
-      is: (val: string) => !!val,
-      then: (schema) => schema.required("Description is required").max(5000, "Description too long"),
-      otherwise: (schema) => schema,
-    }),
-  variants: Yup.array()
-    .of(
-      Yup.object({
-        color: Yup.string().required("Color is required").min(2, "Color too short"),
-        images: Yup.array()
-          .of(Yup.string().url("Invalid image URL"))
-          .min(1, "At least one image required per color")
-          .required("Images are required"),
-        // ✅ NEW: Validate color-level highlights
-        highlights: Yup.object().optional().default({}),
-        subVariants: Yup.array()
-          .of(
-            Yup.object({
-              specifications: Yup.object().optional().default({}),
-              mrpPrice: Yup.string()
-                .required("MRP Price is required")
-                .test("is-number", "Must be a valid number", (val) => {
-                  if (!val || String(val).trim() === '') return false;
-                  return !isNaN(Number(val));
-                })
-                .test("positive", "Price must be greater than 0", (val) => {
-                  if (!val || String(val).trim() === '') return false;
-                  return Number(val) > 0;
-                }),
-              sellingPrice: Yup.string()
-                .required("Selling Price is required")
-                .test("is-number", "Must be a valid number", (val) => {
-                  if (!val || String(val).trim() === '') return false;
-                  return !isNaN(Number(val));
-                })
-                .test("positive", "Price must be greater than 0", (val) => {
-                  if (!val || String(val).trim() === '') return false;
-                  return Number(val) > 0;
-                })
-                .test("less-than-mrp", "Selling price must be less than MRP", function (value) {
-                  const { mrpPrice } = this.parent;
-                  if (!mrpPrice || !value || String(mrpPrice).trim() === '' || String(value).trim() === '') return false;
-                  const mrp = Number(mrpPrice);
-                  const sell = Number(value);
-                  return !isNaN(mrp) && !isNaN(sell) && sell < mrp;
-                }),
-              stock: Yup.string()
-                .optional()
-                .test("is-number", "Must be a valid number", (val) => {
-                  if (!val || String(val).trim() === '') return true;
-                  return !isNaN(Number(val));
-                })
-                .test("non-negative", "Stock cannot be negative", (val) => {
-                  if (!val || String(val).trim() === '') return true;
-                  return Number(val) >= 0;
-                }),
-              sku: Yup.string().optional().max(100, "SKU too long"),
-              isActive: Yup.boolean().default(true),
-            })
-          )
-          .min(1, "Each color must have at least one storage variant")
-          .required("Sub-variants are required"),
-        isActive: Yup.boolean().default(true),
-      })
-    )
-    .min(1, "At least one color variant is required")
-    .required("Product variants are required"),
-  specifications: Yup.object().optional().default({}),
-});
-
-// ============================================
-// ✅ MAIN COMPONENT
-// ============================================
 const AddProductForm: React.FC<{
   initialValues?: ProductFormValues;
   mode?: "add" | "edit";
   onSubmit?: (values: ProductFormValues) => void;
   onClose?: () => void;
-}> = ({
-  initialValues = defaultInitialValues,
-  mode = "add",
-  onSubmit,
-  onClose,
-}) => {
-    // ============================================
-    // ✅ STATE & REFS
-    // ============================================
-    const formikRef = useRef<any>(null);
-    const [uploadingImage, setUploadingImage] = useState(false);
-    const [activeStep, setActiveStep] = useState(mode === "edit" ? 0 : 0);
-    const [activeColorTab, setActiveColorTab] = useState(0);
-    const [expandedSubVariant, setExpandedSubVariant] = useState<number | null>(0);
-    const [snackbarOpen, setOpenSnackbar] = useState(false);
-    const [specDefinitions, setSpecDefinitions] = useState<Record<string, string[]>>({});
+}> = ({ initialValues, mode = "add", onSubmit, onClose }) => {
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const attributeState = useAppSelector((state: any) => state.categoryAttribute);
+  const [activeStep, setActiveStep] = useState(0);
+  const [snackbarOpen, setOpenSnackbar] = useState(false);
+  const isSubmittingRef = useRef(false);
+  const [activeColorTab, setActiveColorTab] = useState(0);
+  const [expandedSubVariant, setExpandedSubVariant] = useState<number | null>(0);
+  const [colorHighlights, setColorHighlights] = useState<Record<number, Record<string, string>>>({});
+  const fetchedCategoryRef = useRef<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [snackbarSeverity, setSnackbarSeverity] = useState<"success" | "error">("success");
+  const isUserSubmittedRef = useRef(false);
 
-    // ✅✅✅ NEW: State for color-level highlights (shared across sub-variants)
-    const [colorHighlights, setColorHighlights] = useState<Record<number, Record<string, string>>>({});
+  const categoryState = useAppSelector((state: any) => state.category);
+  const sellerProduct = useAppSelector((state: any) => state.sellerProduct);
 
-    // ============================================
-    // ✅ REDUX & HOOKS
-    // ============================================
-    const dispatch = useAppDispatch();
-    const navigate = useNavigate();
-    const sellerProduct = useAppSelector((state: any) => state.sellerProduct);
-    const categoryState = useAppSelector((state: any) => state.category);
-    const attributeState = useAppSelector(selectCategoryAttributes);
-    const attributesLoading = useAppSelector(selectCategoryAttributesLoading);
+  // ✅ Fetch categories on mount (if not already loaded)
+  useEffect(() => {
+    if (mode === "add" && (!categoryState.categories || categoryState.categories.length === 0)) {
+      dispatch(fetchCategories());
+    }
+  }, [mode, dispatch, categoryState.categories]);
 
-    // ✅✅✅ NEW: Separate attributes by type for clear UI sections
-    const { variantAttributes, highlightAttributes, otherAttributes } = useMemo(() => {
-      if (attributeState.length === 0) {
-        return { variantAttributes: [], highlightAttributes: [], otherAttributes: [] };
+  const getCurrentSellerFromJWT = () => {
+    try {
+      const jwt = localStorage.getItem('jwt');
+      if (!jwt) return null;
+
+      // JWT format: header.payload.signature
+      // We need the payload (second part)
+      const payload = jwt.split('.')[1];
+
+      // Decode base64url to JSON
+      const decoded = JSON.parse(atob(payload));
+
+      // Return seller details (adjust field names based on your JWT payload)
+      return {
+        _id: decoded._id || decoded.userId || decoded.id || decoded.sellerId,
+        sellerName: decoded.sellerName,
+        businessDetails: decoded.businessDetails,
+        email: decoded.email,
+        role: decoded.role
+      };
+    } catch (e) {
+      console.warn('⚠️ Could not decode JWT for current seller:', e);
+      return null;
+    }
+  };
+
+  const currentSeller = getCurrentSellerFromJWT();
+
+  // ✅ Filter categories by level for dropdowns
+  const levelOneCategories = useMemo(() =>
+    categoryState.categories?.filter((c: Category) => c.level === 1) || [],
+    [categoryState.categories]);
+
+  const levelTwoCategories = useMemo(() =>
+    categoryState.categories?.filter((c: Category) => c.level === 2) || [],
+    [categoryState.categories]);
+
+  const levelThreeCategories = useMemo(() =>
+    categoryState.categories?.filter((c: Category) => c.level === 3) || [],
+    [categoryState.categories]);
+
+  // ✅ Ref to prevent infinite loop when auto-filling catalog categories
+  const hasProcessedCatalogRef = useRef(false);
+
+
+
+  // ✅ Custom hook for formik - MUST be before validationSchema
+  const formik = useProductForm({
+    initialValues,
+    mode,
+    // ✅ Pass context with catalog mode for Yup validation
+    context: {
+      isCatalogProduct: initialValues?.catalogMode?.isCatalogProduct ?? false,
+      category3: initialValues?.category3 ?? '',
+    },
+    onSubmit: async (values) => {
+      // ✅ Guard: Only process user-initiated submits
+      if (!isUserSubmittedRef.current) {
+        return;
       }
-      return separateAttributesByType(attributeState);
-    }, [attributeState]);
+      isUserSubmittedRef.current = false;
 
-    // ============================================
-    // ✅ FORMIK CONFIGURATION
-    // ============================================
-    const formik = useFormik<ProductFormValues>({
-      initialValues,
-      enableReinitialize: true,
-      validationSchema,
-      validateOnChange: false,
-      validateOnBlur: false,
-      validateOnMount: false,
-      onSubmit: async (values) => {
-        console.log('🎯 onSubmit called', { mode, activeStep, title: values.title });
-        const finalStep = mode === "edit" ? 1 : 2;
-        if (activeStep !== finalStep) {
-          console.log('⛔ Submission blocked - not on final step', { activeStep, finalStep });
-          return;
+      // ✅ Guard: Only allow submission on final step
+      const isFinalStep = mode === "edit" ? activeStep === 1 : activeStep === 2;
+      if (!isFinalStep) {
+        return;
+      }
+
+      // ✅ Guard: Prevent duplicate submissions
+      if (isSubmittingRef.current) {
+        return;
+      }
+
+      // ✅ Guard: Don't submit if already created/updated
+      if (sellerProduct.productCreated || sellerProduct.productUpdated) {
+        return;
+      }
+
+      isSubmittingRef.current = true;
+
+      try {
+        // ✅ Transform variants to payload format (string → number for prices/stock)
+
+        // ✅ Get variant attribute names from attributeState
+        const variantAttributeNames = (attributeState.attributes || [])
+          .filter((attr: CategoryAttribute) => attr?.isVariantField && attr?.isActive)
+          .map((attr: CategoryAttribute) => attr?.name?.toLowerCase());
+
+        const variantsPayload: ProductVariantPayload[] = values.variants.flatMap((colorVariant) => {
+          return colorVariant.subVariants
+            .filter((subVar) => !(subVar as any).toBeDeleted)
+            .map(subVar => {
+              // ✅ ONLY include offers from current seller WITH valid price/stock
+              const offersPayload = subVar.offers
+                .filter((offer) => {
+                  if (offer.toBeDeleted) return false;
+                  if (offer.sellerId !== currentSeller?._id) return false;
+
+                  const mrpPrice = Number(offer.mrpPrice);
+                  const sellingPrice = Number(offer.sellingPrice);
+                  const stock = Number(offer.stock);
+
+                  return mrpPrice > 0 && sellingPrice > 0 && stock >= 0;
+                })
+                .map(offer => ({
+                  seller: offer.sellerId,
+                  mrpPrice: Number(offer.mrpPrice),
+                  sellingPrice: Number(offer.sellingPrice),
+                  stock: Number(offer.stock),
+                  sku: offer.sku?.trim() || undefined,
+                  isActive: offer.isActive !== false
+                }));
+
+              // ✅ Skip this sub-variant if no valid offers
+              if (offersPayload.length === 0) {
+                return null;
+              }
+
+              // ✅ Build specifications with ALL fields first
+              const allSpecs = {
+                ...(values.highlights || {}),
+                ...(colorVariant.highlights || {}),
+                ...(subVar.specifications || {})
+              };
+
+              // ✅✅✅ CRITICAL: Filter to ONLY variant-specific fields
+              const variantSpecs: Record<string, string> = {};
+              Object.entries(allSpecs).forEach(([key, value]) => {
+                if (variantAttributeNames.includes(key.toLowerCase())) {
+                  variantSpecs[key] = String(value);
+                }
+              });
+
+              // ✅ Debug: Verify specifications filtering
+              console.log('🔍 [Submit] Variant specs filtering:', {
+                allSpecsKeys: Object.keys(allSpecs),
+                variantAttributeNames,
+                filteredSpecsKeys: Object.keys(variantSpecs),
+                color: colorVariant.color
+              });
+
+              return {
+                color: colorVariant.color.trim(),
+                specifications: variantSpecs,  // ✅ ONLY variant-specific fields
+                images: colorVariant.images,
+                offers: offersPayload,
+                isActive: subVar.isActive !== false,
+                ...(colorVariant.variantOwner && { variantOwner: colorVariant.variantOwner })
+              };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+        });
+
+        // ✅ Ensure at least one variant has seller's valid offers
+        if (variantsPayload.length === 0) {
+          throw new Error('Please add at least one variant with valid price and stock');
         }
-        console.log('🚀 Form submitted from Review step');
-        if (onSubmit) {
-          onSubmit(values);
-          return;
-        }
 
-        // ✅ Debug: Log transformation start
-        console.log('🔍 Starting variant transformation...');
-        const transformationDebug = {
-          totalColors: values.variants.length,
-          totalSubVariants: 0,
-          validVariants: 0,
-          skippedVariants: [] as Array<{ color: string; specs: any; reason: string; mrp: string; sell: string }>,
-        };
+        console.log('✅ [Submit] Valid variants payload:', {
+          count: variantsPayload.length,
+          variants: variantsPayload.map(v => ({
+            color: v.color,
+            specs: v.specifications,
+            offersCount: v.offers.length,
+            offers: v.offers.map(o => ({
+              seller: o.seller,
+              mrpPrice: o.mrpPrice,
+              sellingPrice: o.sellingPrice,
+              stock: o.stock
+            }))
+          }))
+        });
 
-        const productData: any = {
-          title: values.title.trim(),
-          description: values.description.trim(),
-          ...(mode !== "edit" && { category: values.category3 }),
-          // ✅ Flatten variants with filtering for deleted/invalid
-          variants: values.variants.flatMap((colorVariant, colorIndex) => {
-            transformationDebug.totalSubVariants += colorVariant.subVariants.length;
-            return colorVariant.subVariants
-              // ✅ Filter out deleted variants
-              .filter((subVar) => !(subVar as any).toBeDeleted)
-              .map(subVar => {
-                const mrpPriceRaw = String(subVar.mrpPrice ?? '').trim();
-                const sellingPriceRaw = String(subVar.sellingPrice ?? '').trim();
-                const stockRaw = String(subVar.stock ?? '0').trim();
-                const mrpPrice = mrpPriceRaw && !isNaN(Number(mrpPriceRaw)) ? Number(mrpPriceRaw) : null;
-                const sellingPrice = sellingPriceRaw && !isNaN(Number(sellingPriceRaw)) ? Number(sellingPriceRaw) : null;
-                const stock = stockRaw && !isNaN(Number(stockRaw)) ? Number(stockRaw) : 0;
 
-                // ✅ Track why variants are skipped
-                if (!mrpPriceRaw || !sellingPriceRaw) {
-                  transformationDebug.skippedVariants.push({ color: colorVariant.color, specs: subVar.specifications, reason: 'empty price', mrp: mrpPriceRaw, sell: sellingPriceRaw });
-                  console.warn('⚠️ Skipped - empty price:', { color: colorVariant.color, mrpPriceRaw, sellingPriceRaw });
-                  return null;
-                }
-                if (mrpPrice === null || sellingPrice === null) {
-                  transformationDebug.skippedVariants.push({ color: colorVariant.color, specs: subVar.specifications, reason: 'invalid number', mrp: mrpPriceRaw, sell: sellingPriceRaw });
-                  console.warn('⚠️ Skipped - invalid number:', { color: colorVariant.color, mrpPriceRaw, sellingPriceRaw });
-                  return null;
-                }
-                if (mrpPrice <= 0 || sellingPrice <= 0) {
-                  transformationDebug.skippedVariants.push({ color: colorVariant.color, specs: subVar.specifications, reason: 'price <= 0', mrp: mrpPriceRaw, sell: sellingPriceRaw });
-                  console.warn('⚠️ Skipped - price <= 0:', { color: colorVariant.color, mrpPrice, sellingPrice });
-                  return null;
-                }
-                if (sellingPrice >= mrpPrice) {
-                  transformationDebug.skippedVariants.push({ color: colorVariant.color, specs: subVar.specifications, reason: 'selling >= MRP', mrp: mrpPriceRaw, sell: sellingPriceRaw });
-                  console.warn('⚠️ Skipped - selling >= MRP:', { color: colorVariant.color, mrpPrice, sellingPrice });
-                  return null;
-                }
+        // ✅ INDEPENDENT PRODUCT: Create or Update
+        const isCatalogOffer = mode === "add" && catalogSearch.selectedCatalog?._id;
 
-                transformationDebug.validVariants++;
+        // ✅ Build product data
+        const productData: ProductCreatePayload = {
+          // ✅ For independent products only (catalog offers skip these)
+          title: isCatalogOffer ? undefined : values.title.trim(),
+          description: isCatalogOffer ? undefined : values.description.trim(),
+          category: isCatalogOffer ? undefined : values.category3,
 
-                // ✅✅✅ MERGE: Color-level highlights + Sub-variant-specific specs
-                const specifications = {
-                  // First: Add shared highlights for this color
-                  ...(colorHighlights[colorIndex] || {}),
-                  // Then: Add variant-specific specs (RAM, Storage, etc.)
-                  ...(subVar.specifications || {})
-                };
+          // ✅ Required for ALL products: variants array with offers
+          variants: variantsPayload,
 
-                return {
-                  color: colorVariant.color.trim(),
-                  specifications,
-                  mrpPrice,
-                  sellingPrice,
-                  stock,
-                  images: colorVariant.images,
-                  sku: subVar.sku?.trim() || undefined,
-                  isActive: subVar.isActive !== false,
-                };
-              })
-              .filter((v): v is NonNullable<typeof v> => v !== null);
-          }),
+          // ✅ NEW: If this is a catalog offer, include catalogId
+          catalogId: isCatalogOffer ? catalogSearch.selectedCatalog?._id : undefined,
+
+          // ✅ Optional metadata (only used for independent products)
+          highlights: isCatalogOffer ? undefined : (values.highlights || {}),
           isActive: values.isActive !== false,
         };
 
-        // ✅ Debug: Log transformation summary
-        console.log('🔍 Variant transformation summary:', {
-          ...transformationDebug,
-          finalVariantCount: productData.variants.length,
-        });
+        let result;
 
-        if (productData.variants.length === 0) {
-          console.error('❌ No valid variants after transformation');
-          alert('⚠️ Please ensure all variants have valid MRP and Selling Prices (greater than 0, and Selling Price < MRP)');
-          return;
-        }
+        if (mode === "edit" && initialValues?._id) {
+          // ✅ Update existing product
+          result = await dispatch(updateProduct({
+            productId: initialValues._id,
+            product: productData
+          }));
 
-        // ✅ Debug: Log final payload
-        console.log('📤 Final payload:', {
-          title: productData.title,
-          variantsCount: productData.variants.length,
-          firstVariant: productData.variants[0] ? {
-            color: productData.variants[0].color,
-            mrpPrice: productData.variants[0].mrpPrice,
-            mrpPriceType: typeof productData.variants[0].mrpPrice,
-            sellingPrice: productData.variants[0].sellingPrice,
-            specifications: productData.variants[0].specifications,
-          } : null,
-        });
+          if (updateProduct.rejected.match(result)) {
+            throw new Error(result.payload as string || 'Failed to update product');
+          }
+          if (result.payload?.success === false) {
+            throw new Error(result.payload?.message || 'Failed to update product');
+          }
 
-        // ✅ Dispatch
-        if (mode === "edit" && initialValues._id) {
-          console.log('🔄 Dispatching updateProduct');
-          dispatch(updateProduct({ productId: initialValues._id, product: productData }));
+          setSnackbarMessage('Product updated successfully!');
+          setSnackbarSeverity("success");
+          setOpenSnackbar(true);
+
         } else {
+          // ✅ Create new product
           const jwt = localStorage.getItem("jwt");
-          console.log('🆕 Dispatching createProduct', { hasJwt: !!jwt });
-          dispatch(createProduct({ request: productData, jwt: jwt || "" }));
+          result = await dispatch(createProduct({
+            request: productData,
+            jwt: jwt || ""
+          }));
+
+          if (createProduct.rejected.match(result)) {
+            throw new Error(result.payload as string || 'Failed to create product');
+          }
+          if (result.payload?.success === false) {
+            throw new Error(result.payload?.message || 'Failed to create product');
+          }
+
+          setSnackbarMessage('Product created successfully!');
+          setSnackbarSeverity("success");
+          setOpenSnackbar(true);
         }
-      },
-    });
 
-    // ============================================
-    // ✅ EFFECTS
-    // ============================================
-    useEffect(() => {
-      if (categoryState.categories.length === 0) dispatch(fetchCategories());
-    }, [dispatch, categoryState.categories.length]);
+        // ✅ Redirect after successful independent product operation
+        setTimeout(() => {
+          navigate('/seller/products');
+        }, 1500);
 
-    useEffect(() => {
-      const category3Id = formik.values.category3;
-      if (initialValues.variants?.length === 0 && category3Id && mode === "add") {
-        const level3Category = categoryState.categories.find((cat: Category) => cat._id === category3Id);
-        if (level3Category?.categoryId) {
-          dispatch(fetchCategoryAttributes({ categoryId: level3Category.categoryId, includeInactive: false }));
+      } catch (error: any) {
+        // ✅ Extract error message from Redux thunk or plain error
+        let errorMsg = 'Failed to save product';
+
+        if (error?.payload?.errors && Array.isArray(error.payload.errors)) {
+          errorMsg = error.payload.errors.join('; ');
         }
-      }
-      if (mode === "edit" && category3Id && attributeState.length === 0) {
-        const level3Category = categoryState.categories.find((cat: Category) => cat._id === category3Id);
-        if (level3Category?.categoryId) {
-          dispatch(fetchCategoryAttributes({ categoryId: level3Category.categoryId, includeInactive: false }));
+        else if (error?.payload?.message) {
+          errorMsg = error.payload.message;
         }
-      }
-    }, [formik.values.category3, dispatch, categoryState.categories, initialValues.variants?.length, mode, attributeState.length]);
+        else if (error?.payload && typeof error.payload === 'string') {
+          errorMsg = error.payload;
+        }
+        else if (error?.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+          errorMsg = error.response.data.errors.join('; ');
+        }
+        else if (error?.response?.data?.message) {
+          errorMsg = error.response.data.message;
+        }
+        else if (typeof error === 'string') {
+          errorMsg = error;
+        }
+        else if (error?.message && error.message !== '[object Object]') {
+          errorMsg = error.message;
+        }
 
-    useEffect(() => {
-      if (attributeState.length > 0) {
-        const specs: Record<string, string[]> = {};
-        attributeState.forEach((attr: CategoryAttribute) => {
-          if (attr.type === 'select' && attr.options?.length) specs[attr.name] = attr.options;
-        });
-        setSpecDefinitions(specs);
-      }
-    }, [attributeState]);
+        console.error('🚨 Submit error:', errorMsg);
 
-    useEffect(() => {
-      if (sellerProduct.productCreated && mode === "add") {
-        const timer = setTimeout(() => navigate("/seller/products"), 1500);
-        return () => clearTimeout(timer);
-      }
-      if (sellerProduct.productUpdated && mode === "edit") {
-        const timer = setTimeout(() => navigate("/seller/products"), 1500);
-        return () => clearTimeout(timer);
-      }
-    }, [sellerProduct.productCreated, sellerProduct.productUpdated, mode, navigate]);
+        // ✅ Show error in snackbar
+        setSnackbarMessage(errorMsg);
+        setSnackbarSeverity("error");
+        setOpenSnackbar(true);
 
-    useEffect(() => { formikRef.current = formik; }, [formik]);
+      } finally {
+        // ✅ Always reset submitting flag
+        isSubmittingRef.current = false;
+      }
+    },
+  });
 
-    // ============================================
-    // ✅ MEMOIZED HELPERS
-    // ============================================
-    const levelOneCategories = useMemo(() =>
-      categoryState.categories
-        .filter((cat: Category) => cat.level === 1)
-        .sort((a: Category, b: Category) => {
-          const orderA = a.order ?? 999999;
-          const orderB = b.order ?? 999999;
-          return orderA !== orderB ? orderA - orderB : (a.name || "").localeCompare(b.name || "");
-        }),
-      [categoryState.categories]
+  const catalogSearch = useCatalogSearch(formik);
+
+  // ✅ FIX: validationSchema AFTER catalogSearch declaration
+  const validationSchema = useMemo(() => {
+    return createValidationSchema(
+      attributeState.attributes || [],
+      catalogSearch.isCatalogProduct || false
     );
+  }, [
+    attributeState.attributes?.length,
+    catalogSearch.isCatalogProduct,
+  ]);
 
-    const levelTwoCategories = useMemo(() => {
-      if (!formik.values.category) return [];
-      return categoryState.categories
-        .filter((cat: Category) => cat.level === 2 && cat.parentCategory === formik.values.category)
-        .sort((a: Category, b: Category) => {
-          const orderA = a.order ?? 999999;
-          const orderB = b.order ?? 999999;
-          return orderA !== orderB ? orderA - orderB : (a.name || "").localeCompare(b.name || "");
-        });
-    }, [categoryState.categories, formik.values.category]);
+  // ✅ Step validation - skip title/desc validation for catalog products
+  const isStepValid = useCallback((step: number) => {
 
-    const levelThreeCategories = useMemo(() => {
-      if (!formik.values.category2) return [];
-      return categoryState.categories
-        .filter((cat: Category) => cat.level === 3 && cat.parentCategory === formik.values.category2)
-        .sort((a: Category, b: Category) => (a.name || "").localeCompare(b.name || ""));
-    }, [categoryState.categories, formik.values.category2]);
+    const isValidOffer = (offer: any): boolean => {
+      // ✅ Must be from current seller
+      if (offer?.sellerId !== currentSeller?._id) return false;
 
-    // ============================================
-    // ✅ CATEGORY RESET EFFECTS
-    // ============================================
-    useEffect(() => {
-      if (mode === "add") {
-        formik.setFieldValue("category2", "");
-        formik.setFieldValue("category3", "");
-        formik.setFieldValue("variants", []);
-        setColorHighlights({}); // ✅ Reset highlights
-        setActiveColorTab(0);
-        setExpandedSubVariant(0);
-      }
-    }, [formik.values.category, mode]);
-
-    useEffect(() => {
-      if (mode === "add") {
-        formik.setFieldValue("category3", "");
-        formik.setFieldValue("variants", []);
-        setColorHighlights({}); // ✅ Reset highlights
-        setActiveColorTab(0);
-        setExpandedSubVariant(0);
-      }
-    }, [formik.values.category2, mode]);
-
-    // ============================================
-    // ✅ VARIANT HANDLERS
-    // ============================================
-    const handleAddColorVariant = useCallback(() => {
-      const newColorVariant: ProductVariantForm = {
-        color: '', images: [],
-        subVariants: [{ specifications: {}, mrpPrice: '', sellingPrice: '', stock: '0', isActive: true }],
-        isActive: true,
+      const isValidPrice = (value: any): boolean => {
+        const strValue = String(value).trim();
+        if (!strValue) return false;
+        const numValue = Number(strValue);
+        return !isNaN(numValue) && numValue > 0;
       };
-      formik.setFieldValue('variants', [...formik.values.variants, newColorVariant]);
-      setActiveColorTab(formik.values.variants.length);
-      setExpandedSubVariant(0);
-    }, [formik.values.variants, formik]);
 
-    const handleRemoveColorVariant = useCallback((index: number) => {
-      if (formik.values.variants.length <= 1) {
-        formik.setFieldValue('variants', [{ color: '', images: [], subVariants: [{ specifications: {}, mrpPrice: '', sellingPrice: '', stock: '0', isActive: true }], isActive: true }]);
-        setColorHighlights({});
-        setActiveColorTab(0); setExpandedSubVariant(0); return;
+      const isValidStock = (value: any): boolean => {
+        const strValue = String(value).trim();
+        if (strValue === '') return false;
+        const numValue = Number(strValue);
+        return !isNaN(numValue) && numValue >= 0;
+      };
+
+      return isValidPrice(offer?.mrpPrice) &&
+        isValidPrice(offer?.sellingPrice) &&
+        isValidStock(offer?.stock);
+    };
+
+    const isCatalogMode = catalogSearch.isCatalogProduct;
+
+    if (mode === "edit") {
+      if (step === 0) {
+        // ✅ For edit: require at least ONE variant with seller's valid offer
+        return !!(formik.values.variants?.length > 0 &&
+          formik.values.variants.some(cv =>
+            cv?.color?.trim() &&
+            cv?.images?.length > 0 &&
+            cv?.subVariants?.some(sv =>
+              sv?.offers?.some(offer => isValidOffer(offer))
+            )
+          ));
       }
-      const newVariants = formik.values.variants.filter((_, i) => i !== index);
-      formik.setFieldValue('variants', newVariants);
-      // ✅ Remove highlights for deleted color
-      setColorHighlights(prev => {
-        const newHighlights = { ...prev };
-        delete newHighlights[index];
-        // Re-index remaining highlights
-        const reIndexed: Record<number, Record<string, string>> = {};
-        Object.keys(newHighlights).forEach(key => {
-          const numKey = Number(key);
-          if (numKey < index) reIndexed[numKey] = newHighlights[numKey];
-          else if (numKey > index) reIndexed[numKey - 1] = newHighlights[numKey];
+      return true;
+    }
+
+    if (step === 0) return !!(formik.values.category && formik.values.category2 && formik.values.category3);
+
+    if (step === 1) {
+      if (isCatalogMode) {
+        // ✅ Catalog mode: require at least ONE variant with seller's valid offer
+        return !!(formik.values.variants?.length > 0 &&
+          formik.values.variants.some(cv =>
+            cv?.color?.trim() &&
+            cv?.subVariants?.some(sv =>
+              sv?.offers?.some(offer => isValidOffer(offer))
+            )
+          ));
+      }
+      // ✅ Independent product: require title, description, and at least one variant with offer
+      return !!(formik.values.title?.trim() && formik.values.description?.trim() &&
+        formik.values.variants?.length > 0 &&
+        formik.values.variants.some(cv =>
+          cv?.color?.trim() && cv?.images?.length > 0 &&
+          cv?.subVariants?.some(sv =>
+            sv?.offers?.some(offer => isValidOffer(offer))
+          )
+        ));
+    }
+    return true;
+  }, [formik.values, mode, catalogSearch.isCatalogProduct]);
+  // ✅ Navigation with catalog mode handling
+  const handleNext = async () => {
+    console.log('🔍 [handleNext] Called:', { activeStep, mode, isCatalogProduct: catalogSearch.isCatalogProduct });
+    // Handle catalog search step
+    if (mode === "add" && catalogSearch.showSearch && activeStep === 0) {
+      if (catalogSearch.selectedCatalog) {
+        // ✅ Catalog already selected - attributes fetched in handleSelectCatalog
+        catalogSearch.handleSkipCatalogSearch();
+        setActiveStep(1);  // ✅ Go to Step 1
+        return;
+      }
+      if (catalogSearch.results.length > 0 && !catalogSearch.selectedCatalog) {
+        const confirmSkip = window.confirm(
+          '⚠️ You searched but didn\'t select a catalog. Create independent product instead?'
+        );
+        if (!confirmSkip) return;
+      }
+      catalogSearch.handleSkipCatalogSearch();
+      return;
+    }
+    // Existing validation logic
+    if (mode === "edit") {
+      if (activeStep === 0) {
+        const errors = await formik.validateForm();
+        const step0Fields = ['variants'];
+        const hasErrors = step0Fields.some(field => errors[field as keyof typeof errors]);
+        if (!hasErrors && isStepValid(activeStep)) {
+          setActiveStep((prev) => prev + 1);
+        } else {
+          formik.setTouched({
+            variants: formik.values.variants.map(() => ({
+              color: true,
+              images: true,
+              highlights: true,
+              subVariants: [],
+              isActive: false
+            }))
+          });
+        }
+      }
+    } else {
+      // ✅ INDEPENDENT PRODUCT FLOW
+      if (activeStep === 0) {
+        const errors = await formik.validateForm();
+        const step0Fields = ['category', 'category2', 'category3'];
+        const hasErrors = step0Fields.some(field => errors[field as keyof typeof errors]);
+        if (!hasErrors && isStepValid(activeStep)) {
+          // ✅ Fetch attributes for independent products only
+          const categoryObj = categoryState.categories?.find(
+            (cat: Category) => cat._id === formik.values.category3
+          );
+          const categoryIdSlug = categoryObj?.categoryId;
+          if (categoryIdSlug) {
+            console.log('📥 Fetching attributes for slug:', categoryIdSlug);
+            // ✅ Fetch and WAIT for completion
+            const result = await dispatch(fetchCategoryAttributes({
+              categoryId: categoryIdSlug,
+              includeInactive: false
+            }));
+            // ✅ Type-safe check
+            if (fetchCategoryAttributes.fulfilled.match(result)) {
+              console.log('✅ Attributes fetched:', result.payload.length);
+              // ✅ ONLY increment step ONCE after fetch completes
+              setActiveStep((prev) => {
+                const newStep = prev + 1;
+                console.log('📍 Moving to step:', newStep);
+                return newStep;
+              });
+            } else {
+              console.error('❌ Fetch failed:', fetchCategoryAttributes.rejected.match(result) ? result.error : 'Unknown');
+              alert('Failed to load product attributes. Please try again.');
+            }
+          } else {
+            // ✅ No slug found - just move to next step
+            setActiveStep((prev) => prev + 1);
+          }
+        } else {
+          console.warn('⚠️ Validation failed:', errors);
+          formik.setTouched({ category: true, category2: true, category3: true });
+        }
+      }
+      // ✅ Step 1 to Step 2
+      else if (activeStep === 1) {
+        console.log('🔍 [Step 1 Validation] Starting validation...');
+        const errors = await formik.validateForm();
+        console.log('📋 [Validation Errors]', JSON.stringify(errors, null, 2));
+        const isCatalogMode = catalogSearch.isCatalogProduct;
+        const step1Fields = isCatalogMode ? ['variants'] : ['title', 'description', 'variants'];
+        // ✅ Log variant errors in detail
+        if (errors.variants && Array.isArray(errors.variants)) {
+          errors.variants.forEach((variantError: any, index: number) => {
+            if (variantError) {
+              console.error(`❌ [Variant ${index} Errors]`, variantError);
+              // ✅ Check each sub-variant
+              if (variantError.subVariants && Array.isArray(variantError.subVariants)) {
+                variantError.subVariants.forEach((subError: any, subIndex: number) => {
+                  if (subError) {
+                    console.error(`❌ [Variant ${index}, SubVariant ${subIndex}]`, subError);
+                  }
+                });
+              }
+            }
+          });
+        }
+        const hasErrors = step1Fields.some(field => {
+          const hasError = errors[field as keyof typeof errors];
+          if (hasError) {
+            console.log('❌ [Validation Failed] Field:', field, 'Error:', hasError);
+          }
+          return hasError;
         });
-        return reIndexed;
+        if (!hasErrors && isStepValid(activeStep)) {
+          console.log('✅ [Validation Passed] Moving to Step 2');
+          setActiveStep((prev) => prev + 1);
+        } else {
+          console.warn('⚠️ [Validation Failed] Cannot proceed to Step 2');
+          // ✅ Touch all fields to show errors
+          formik.setTouched({
+            title: !isCatalogMode,
+            description: !isCatalogMode,
+            variants: formik.values.variants.map((variant, vIdx) => ({
+              color: true,
+              images: !isCatalogMode,
+              highlights: true,
+              subVariants: variant.subVariants?.map((_, sIdx) => ({
+                specifications: true,
+                mrpPrice: true,
+                sellingPrice: true,
+                stock: true,
+                sku: false,
+                isActive: false,
+                isFromCatalog: false,
+                toBeDeleted: false,
+                _id: false
+              })) || [],
+              isActive: false,
+              isFromCatalog: false,
+              _id: false,
+              toBeDeleted: false
+            }))
+          } as any);  // ✅ Type assertion to bypass strict typing
+        }
+      }
+    }
+  };
+
+  const handleBack = useCallback(() => {
+    // ✅ Clear attributes when going back to category selection
+    if (activeStep === 1) {
+      dispatch(resetCategoryAttributes());  // ✅ Add this action to your slice
+    }
+    setActiveStep((prev) => prev - 1);
+  }, [activeStep, dispatch]);
+
+  const steps = mode === "edit"
+    ? ["Product Details & Variants", "Review & Submit"]
+    : ["Select Category", "Basic Information & Variants", "Review & Submit"];
+
+  // ✅ Variant handlers - ALL wrapped with useCallback
+  const handleAddColorVariant = useCallback((templateData?: { color?: string; specifications?: Record<string, any>; images?: string[] }) => {
+
+    const newColorVariant: ProductVariantForm = {
+      color: templateData?.color || '',  // ✅ Pre-fill color if provided
+      images: templateData?.images || [],  // ✅ Pre-fill images if provided
+      highlights: {},
+      subVariants: [
+        {
+          specifications: templateData?.specifications || {},  // ✅ Pre-fill specs if provided
+          offers: [
+            {
+              sellerId: currentSeller?._id || '',
+              mrpPrice: '',
+              sellingPrice: '',
+              stock: '0',
+              sku: '',
+              isActive: true
+            }
+          ],
+          isActive: true,
+          isFromCatalog: false  // ✅ This is a NEW color variant
+        }
+      ],
+      isActive: true,
+      isFromCatalog: false
+    };
+
+    const newVariants = [...formik.values.variants, newColorVariant];
+    formik.setFieldValue('variants', newVariants);
+    setActiveColorTab(newVariants.length - 1);
+
+    console.log('✅ [Add Color Variant] Added:', {
+      colorIndex: newVariants.length - 1,
+      color: templateData?.color || 'Custom',
+      isFromCatalog: false,
+      sellerId: currentSeller?._id,
+      hasTemplateSpecs: !!templateData?.specifications
+    });
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  const handleRemoveColorVariant = useCallback((index: number) => {
+    if (formik.values.variants.length <= 1) {
+      formik.setFieldValue('variants', [{ color: '', images: [], highlights: {}, subVariants: [{ specifications: {}, mrpPrice: '', sellingPrice: '', stock: '0', isActive: true }], isActive: true }]);
+      setColorHighlights({});
+      setActiveColorTab(0);
+      return;
+    }
+    const newVariants = formik.values.variants.filter((_, i) => i !== index);
+    formik.setFieldValue('variants', newVariants);
+    setColorHighlights(prev => {
+      const reIndexed: Record<number, Record<string, string>> = {};
+      Object.keys(prev).forEach(key => {
+        const numKey = Number(key);
+        if (numKey < index) reIndexed[numKey] = prev[numKey];
+        else if (numKey > index) reIndexed[numKey - 1] = prev[numKey];
       });
-      if (activeColorTab >= newVariants.length) setActiveColorTab(Math.max(0, newVariants.length - 1));
-    }, [formik.values.variants, activeColorTab, formik]);
+      return reIndexed;
+    });
+    if (activeColorTab >= newVariants.length) setActiveColorTab(Math.max(0, newVariants.length - 1));
+  }, [formik.values.variants, formik.setFieldValue, activeColorTab]);
 
-    const handleColorVariantChange = useCallback((colorIndex: number, field: keyof ProductVariantForm, value: any) => {
+  const handleColorVariantChange = useCallback(
+    (colorIndex: number, field: string, value: string) => {
       const newVariants = [...formik.values.variants];
-      newVariants[colorIndex] = { ...newVariants[colorIndex], [field]: value };
-      formik.setFieldValue('variants', newVariants);
-    }, [formik.values.variants, formik]);
 
-    const handleAddSubVariant = useCallback((colorIndex: number) => {
-      const newVariants = [...formik.values.variants];
-      newVariants[colorIndex].subVariants.push({ specifications: {}, mrpPrice: '', sellingPrice: '', stock: '0', isActive: true });
-      formik.setFieldValue('variants', newVariants);
-      setExpandedSubVariant(newVariants[colorIndex].subVariants.length - 1);
-    }, [formik.values.variants, formik]);
-
-    const handleRemoveSubVariant = useCallback((colorIndex: number, subVariantIndex: number) => {
-      const newVariants = [...formik.values.variants];
-      const subVariant = newVariants[colorIndex].subVariants[subVariantIndex];
-      if (subVariant._id) {
-        newVariants[colorIndex].subVariants[subVariantIndex] = {
-          ...subVariant,
-          toBeDeleted: true,
-        };
-        formik.setFieldValue('variants', newVariants);
-        console.log('🗑️ Sub-variant marked for deletion:', { _id: subVariant._id, color: newVariants[colorIndex].color });
-      } else {
-        if (newVariants[colorIndex].subVariants.length <= 1) {
-          alert('Each color must have at least one storage variant');
-          return;
-        }
-        newVariants[colorIndex].subVariants.splice(subVariantIndex, 1);
-        formik.setFieldValue('variants', newVariants);
-        if (expandedSubVariant !== null && expandedSubVariant >= newVariants[colorIndex].subVariants.length) {
-          setExpandedSubVariant(newVariants[colorIndex].subVariants.length - 1);
-        }
-      }
-    }, [formik.values.variants, expandedSubVariant, formik]);
-
-    const handleSubVariantChange = useCallback((colorIndex: number, subVariantIndex: number, field: keyof ProductSubVariantForm, value: any) => {
-      const newVariants = [...formik.values.variants];
-      newVariants[colorIndex].subVariants[subVariantIndex] = { ...newVariants[colorIndex].subVariants[subVariantIndex], [field]: value };
-      formik.setFieldValue('variants', newVariants);
-    }, [formik.values.variants, formik]);
-
-    const handleSubVariantSpecChange = useCallback((colorIndex: number, subVariantIndex: number, attributeName: string, value: any) => {
-      const newVariants = [...formik.values.variants];
-      newVariants[colorIndex].subVariants[subVariantIndex] = {
-        ...newVariants[colorIndex].subVariants[subVariantIndex],
-        specifications: { ...newVariants[colorIndex].subVariants[subVariantIndex].specifications, [attributeName]: value },
+      newVariants[colorIndex] = {
+        ...newVariants[colorIndex],
+        [field]: value
       };
+
       formik.setFieldValue('variants', newVariants);
-    }, [formik.values.variants, formik]);
+    },
+    [formik.values.variants, formik.setFieldValue]
+  );
 
-    // ✅✅✅ NEW: Handle color-level highlight change
-    const handleColorHighlightChange = useCallback((colorIndex: number, attrName: string, value: string) => {
-      setColorHighlights(prev => ({
-        ...prev,
-        [colorIndex]: {
-          ...prev[colorIndex],
-          [attrName]: value
+  const handleAddSubVariant = useCallback((colorIndex: number, templateSpecs?: Record<string, any>) => {
+    // ✅ NEW sub-variants start with offers array containing current seller's offer
+    const newSubVariant = {
+      // ✅ Pre-fill specs from catalog template if provided (for consistency)
+      specifications: templateSpecs ? { ...templateSpecs } : {},
+      offers: [
+        {
+          sellerId: currentSeller?._id || '',
+          mrpPrice: '',
+          sellingPrice: '',
+          stock: '0',
+          sku: '',
+          isActive: true
         }
-      }));
-    }, []);
+      ],
+      isActive: true,
+      isFromCatalog: false  // ✅ This is a NEW variant, not from catalog
+    };
 
-    const handleColorVariantImageUpload = useCallback(async (colorIndex: number, files: FileList | null) => {
-      if (!files?.length) return;
+    // ✅ Add to variants array
+    const newVariants = [...formik.values.variants];
+    newVariants[colorIndex].subVariants.push(newSubVariant);
+    formik.setFieldValue('variants', newVariants);
+
+    // ✅ Expand the newly added sub-variant for editing
+    setExpandedSubVariant(newVariants[colorIndex].subVariants.length - 1);
+
+    console.log('✅ [Add Sub-Variant] Added:', {
+      colorIndex,
+      hasTemplateSpecs: !!templateSpecs,
+      specs: templateSpecs || {},
+      sellerId: currentSeller?._id
+    });
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  const handleRemoveSubVariant = useCallback((colorIndex: number, subVariantIndex: number) => {
+    const newVariants = [...formik.values.variants];
+    const subVariant = newVariants[colorIndex].subVariants[subVariantIndex];
+    if (subVariant._id) {
+      newVariants[colorIndex].subVariants[subVariantIndex] = { ...subVariant, toBeDeleted: true };
+    } else {
+      if (newVariants[colorIndex].subVariants.length <= 1) {
+        alert('Each color must have at least one storage variant');
+        return;
+      }
+      newVariants[colorIndex].subVariants.splice(subVariantIndex, 1);
+    }
+    formik.setFieldValue('variants', newVariants);
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  const handleSubVariantChange = useCallback(
+    (colorIndex: number, subIndex: number, field: string, value: string | number) => {
+      console.log('✏️ [SubVariant Change]', { colorIndex, subIndex, field, value });
+
+      // ✅ Use functional update to always get latest formik state
+      formik.setFieldValue('variants', (prevVariants: ProductVariantForm[]) => {
+        return prevVariants.map((variant, vIdx) => {
+          if (vIdx !== colorIndex) return variant;
+          return {
+            ...variant,
+            subVariants: variant.subVariants.map((subVar, sIdx) => {
+              if (sIdx !== subIndex) return subVar;
+              return {
+                ...subVar,
+                [field]: value
+              } as ProductSubVariantForm;
+            })
+          };
+        });
+      });
+
+      console.log('✅ [SubVariant Updated]', { colorIndex, subIndex, field, value });
+    },
+    [formik.setFieldValue]  // ✅ Only depend on stable setFieldValue
+  );
+
+  const handleAddOffer = useCallback((colorIndex: number, subVariantIndex: number) => {
+    const newOffer: ProductOfferForm = {
+      sellerId: currentSeller?._id || '',
+      mrpPrice: '',
+      sellingPrice: '',
+      stock: '0',
+      sku: '',
+      isActive: true
+    };
+    const newVariants = [...formik.values.variants];
+    newVariants[colorIndex].subVariants[subVariantIndex].offers.push(newOffer);
+    formik.setFieldValue('variants', newVariants);
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  // ✅ Remove offer from sub-variant
+  const handleRemoveOffer = useCallback((colorIndex: number, subVariantIndex: number, offerIndex: number) => {
+    const newVariants = [...formik.values.variants];
+    const offer = newVariants[colorIndex].subVariants[subVariantIndex].offers[offerIndex];
+
+    if (offer._id) {
+      // Mark as toBeDeleted instead of removing (for existing offers)
+      newVariants[colorIndex].subVariants[subVariantIndex].offers[offerIndex] = {
+        ...offer,
+        toBeDeleted: true
+      };
+    } else {
+      // Remove new offer that hasn't been saved
+      newVariants[colorIndex].subVariants[subVariantIndex].offers.splice(offerIndex, 1);
+    }
+    formik.setFieldValue('variants', newVariants);
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  // ✅ Update offer field value
+  const handleOfferChange = useCallback((
+    colorIndex: number,
+    subVariantIndex: number,
+    offerIndex: number,
+    field: string,
+    value: string | number | boolean
+  ) => {
+    const newVariants = [...formik.values.variants];
+
+    // ✅ Process value based on field type
+    let processedValue: any = value;
+
+    if (field === 'mrpPrice' || field === 'sellingPrice') {
+      // Price fields: convert string to number, handle empty
+      if (typeof value === 'string') {
+        processedValue = value === '' ? '' : parseFloat(value);
+        if (isNaN(processedValue)) processedValue = '';
+      }
+    }
+    else if (field === 'stock') {
+      // Stock field: convert string to integer, default to 0
+      if (typeof value === 'string') {
+        processedValue = value === '' ? 0 : parseInt(value, 10);
+        if (isNaN(processedValue)) processedValue = 0;
+      }
+    }
+    else if (field === 'isActive') {
+      // Boolean field: ensure it's actually boolean
+      processedValue = value === true || value === 'true' || value === 1;
+    }
+    // sku and other string fields: keep as-is
+
+    // ✅ Update the offer
+    newVariants[colorIndex].subVariants[subVariantIndex].offers[offerIndex] = {
+      ...newVariants[colorIndex].subVariants[subVariantIndex].offers[offerIndex],
+      [field]: processedValue
+    };
+
+    formik.setFieldValue('variants', newVariants);
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  // ✅ FIX: Wrap with useCallback
+  const handleSubVariantSpecChange = useCallback((colorIndex: number, subVariantIndex: number, attributeName: string, value: any) => {
+    const newVariants = [...formik.values.variants];
+    newVariants[colorIndex].subVariants[subVariantIndex] = {
+      ...newVariants[colorIndex].subVariants[subVariantIndex],
+      specifications: { ...newVariants[colorIndex].subVariants[subVariantIndex].specifications, [attributeName]: value },
+    };
+    formik.setFieldValue('variants', newVariants);
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  // ✅ FIX: Wrap with useCallback
+  const handleColorHighlightChange = useCallback((colorIndex: number, attrName: string, value: string) => {
+    setColorHighlights(prev => ({
+      ...prev,
+      [colorIndex]: { ...prev[colorIndex], [attrName]: value }
+    }));
+  }, []);
+
+  const handleColorVariantImageUpload = useCallback(
+    async (colorIndex: number, files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      console.log('📷 [Image Upload] Color:', colorIndex, 'Files:', files.length);
+
       setUploadingImage(true);
       try {
         const uploadedUrls: string[] = [];
@@ -580,629 +829,490 @@ const AddProductForm: React.FC<{
           const url = await uploadToCloudinary(files[i]);
           if (url) uploadedUrls.push(url);
         }
+
         if (uploadedUrls.length > 0) {
-          const newVariants = [...formik.values.variants];
-          newVariants[colorIndex] = { ...newVariants[colorIndex], images: [...newVariants[colorIndex].images, ...uploadedUrls] };
-          formik.setFieldValue('variants', newVariants);
+          // ✅ Use functional update for images too
+          formik.setFieldValue('variants', (prevVariants: ProductVariantForm[]) => {
+            const newVariants = [...prevVariants];
+            const existingImages = newVariants[colorIndex]?.images || [];
+            newVariants[colorIndex] = {
+              ...newVariants[colorIndex],
+              images: [...existingImages, ...uploadedUrls]
+            };
+            return newVariants;
+          });
+          console.log('✅ [Images Updated]', { colorIndex, urls: uploadedUrls });
         }
       } catch (error) {
-        console.error("Image upload failed:", error);
-        alert("Failed to upload images");
-      } finally { setUploadingImage(false); }
-    }, [formik.values.variants, formik]);
-
-    const handleRemoveColorVariantImage = useCallback((colorIndex: number, imageIndex: number) => {
-      const newVariants = [...formik.values.variants];
-      newVariants[colorIndex].images.splice(imageIndex, 1);
-      formik.setFieldValue('variants', newVariants);
-    }, [formik.values.variants, formik]);
-
-    // ============================================
-    // ✅ VALIDATION HELPERS
-    // ============================================
-    const isStepValid = (step: number) => {
-      const isValidPrice = (value: any): boolean => {
-        if (value == null) return false;
-        const strValue = String(value).trim();
-        if (strValue === '') return false;
-        const numValue = Number(strValue);
-        return !isNaN(numValue) && numValue > 0;
-      };
-      if (mode === "edit") {
-        if (step === 0) {
-          return !!(formik.values.title?.trim() && formik.values.description?.trim() &&
-            formik.values.variants?.length > 0 &&
-            formik.values.variants.every(cv => cv?.color?.trim() && cv?.images?.length > 0 &&
-              cv?.subVariants?.length > 0 && cv?.subVariants?.every(sv => isValidPrice(sv?.mrpPrice) && isValidPrice(sv?.sellingPrice))));
-        }
-        return true;
+        console.error('❌ [Image Upload Failed]', error);
+        alert('Failed to upload images');
+      } finally {
+        setUploadingImage(false);
       }
-      if (step === 0) return !!(formik.values.category && formik.values.category2 && formik.values.category3);
-      if (step === 1) {
-        return !!(formik.values.title?.trim() && formik.values.description?.trim() &&
-          formik.values.variants?.length > 0 &&
-          formik.values.variants.every(cv => cv?.color?.trim() && cv?.images?.length > 0 &&
-            cv?.subVariants?.length > 0 && cv?.subVariants?.every(sv => isValidPrice(sv?.mrpPrice) && isValidPrice(sv?.sellingPrice))));
+    },
+    [formik.setFieldValue]  // ✅ Stable dependency
+  );
+
+  const handleRemoveColorVariantImage = useCallback((colorIndex: number, imageIndex: number) => {
+    const newVariants = [...formik.values.variants];
+    newVariants[colorIndex].images.splice(imageIndex, 1);
+    formik.setFieldValue('variants', newVariants);
+  }, [formik.values.variants, formik.setFieldValue]);
+
+  // ✅ Early fetch attributes for catalog products
+  useEffect(() => {
+    if (
+      mode === "add" &&
+      catalogSearch.isCatalogProduct &&
+      catalogSearch.selectedCatalog?.category &&
+      !attributeState.attributes?.length  // Only fetch if not already loaded
+    ) {
+      const catalogCategory = catalogSearch.selectedCatalog.category;
+      const categoryIdSlug = typeof catalogCategory === 'string'
+        ? catalogCategory
+        : catalogCategory.categoryId || catalogCategory._id;
+      if (categoryIdSlug) {
+        dispatch(fetchCategoryAttributes({
+          categoryId: categoryIdSlug,
+          includeInactive: false
+        }));
       }
-      return true;
-    };
+    }
+  }, [
+    mode,
+    catalogSearch.isCatalogProduct,
+    catalogSearch.selectedCatalog?.category,
+    attributeState.attributes?.length,
+    dispatch
+  ]);
 
-    const handleNext = async () => {
-      if (mode === "edit") {
-        if (activeStep === 0) {
-          const errors = await formik.validateForm();
-          const step0Fields = ['title', 'description', 'variants'];
-          const hasStep0Errors = step0Fields.some(field => errors[field as keyof typeof errors]);
-          if (!hasStep0Errors && isStepValid(activeStep)) {
-            setActiveStep((prev) => prev + 1);
-          } else {
-            formik.setTouched({
-              title: true,
-              description: true,
-              variants: formik.values.variants.map(() => ({
-                color: true,
-                images: true,
-                highlights: {},
-                subVariants: formik.values.variants[0]?.subVariants.map(() => ({
-                  mrpPrice: true,
-                  sellingPrice: true,
-                  stock: true,
-                  sku: true,
-                  specifications: {},
-                  isActive: false,
-                })) || [],
-                isActive: false,
-              })),
-            });
-            console.log('⚠️ Step 0 validation errors:', errors);
-          }
-        }
-      } else {
-        if (activeStep === 0) {
-          const errors = await formik.validateForm();
-          const step0Fields = ['category', 'category2', 'category3'];
-          const hasStep0Errors = step0Fields.some(field => errors[field as keyof typeof errors]);
-          if (!hasStep0Errors && isStepValid(activeStep)) {
-            setActiveStep((prev) => prev + 1);
-          } else {
-            formik.setTouched({
-              category: true,
-              category2: true,
-              category3: true,
-            });
-            console.log('⚠️ Step 0 validation errors:', errors);
-          }
-        } else if (activeStep === 1) {
-          const errors = await formik.validateForm();
-          const step1Fields = ['title', 'description', 'variants'];
-          const hasStep1Errors = step1Fields.some(field => errors[field as keyof typeof errors]);
-          if (!hasStep1Errors && isStepValid(activeStep)) {
-            setActiveStep((prev) => prev + 1);
-          } else {
-            formik.setTouched({
-              title: true,
-              description: true,
-              variants: formik.values.variants.map(() => ({
-                color: true,
-                images: true,
-                highlights: {},
-                subVariants: formik.values.variants[0]?.subVariants.map(() => ({
-                  mrpPrice: true,
-                  sellingPrice: true,
-                  stock: true,
-                  sku: true,
-                  specifications: {},
-                  isActive: false,
-                })) || [],
-                isActive: false,
-              })),
-            });
-            console.log('⚠️ Step 1 validation errors:', errors);
-          }
-        }
+  // ✅ Clear attributes when going back
+  useEffect(() => {
+    // Only clear if we're still on Step 0 (category selection)
+    if (activeStep === 0) {
+      dispatch(resetCategoryAttributes());
+    }
+  }, [formik.values.category3, activeStep, dispatch]);
+
+  // ✅ Show snackbar messages only (navigation handled in button onClick)
+  useEffect(() => {
+    // ✅ Success: Show snackbar, reset flag, but DON'T navigate
+    if (sellerProduct.productCreated && !sellerProduct.loading) {
+      // Snackbar already shown in button onClick, but ensure it's visible
+      if (!snackbarOpen) {
+        setSnackbarMessage("🎉 Product created successfully!");
+        setSnackbarSeverity("success");
+        setOpenSnackbar(true);
       }
-    };
+      // ✅ Navigation is handled ONLY by button click - DO NOT navigate here
+    }
 
-    const handleBack = () => setActiveStep((prev) => prev - 1);
-    const handleCloseSnackbar = () => setOpenSnackbar(false);
-
-    // ============================================
-    // ✅ IMAGE HANDLERS
-    // ============================================
-    const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      setUploadingImage(true);
-      try {
-        const image = await uploadToCloudinary(file);
-        if (image) formik.setFieldValue("images", [...formik.values.images, image]);
-      } catch (error) {
-        console.error("Image upload failed:", error);
-        alert("Failed to upload image");
-      } finally { setUploadingImage(false); }
-    };
-
-    const handleRemoveImage = (index: number) => {
-      const updated = [...formik.values.images];
-      updated.splice(index, 1);
-      formik.setFieldValue("images", updated);
-    };
-
-    // ============================================
-    // ✅ ERROR HELPERS
-    // ============================================
-    const getColorVariantError = (colorIndex: number, field: keyof ProductVariantForm): string | undefined => {
-      const errors = formik.errors.variants;
-      if (Array.isArray(errors) && errors[colorIndex]) return (errors[colorIndex] as any)[field] as string | undefined;
-      return undefined;
-    };
-
-    const getSubVariantError = (colorIndex: number, subVariantIndex: number, field: keyof ProductSubVariantForm): string | undefined => {
-      const errors = formik.errors.variants;
-      if (Array.isArray(errors) && errors[colorIndex]) {
-        const colorError = errors[colorIndex] as any;
-        if (colorError.subVariants?.[subVariantIndex] && field !== 'specifications') {
-          return colorError.subVariants[subVariantIndex][field] as string | undefined;
-        }
+    // ✅ Update success: Show snackbar, optionally close dialog
+    if (sellerProduct.productUpdated && !sellerProduct.loading) {
+      setSnackbarMessage("✅ Product updated successfully!");
+      setSnackbarSeverity("success");
+      setOpenSnackbar(true);
+      dispatch(resetUpdateFlag());
+      if (mode === "edit" && onClose) {
+        setTimeout(() => onClose(), 1000);
       }
-      return undefined;
-    };
+    }
 
-    const getSubVariantSpecError = (colorIndex: number, subVariantIndex: number, attributeName: string): string | undefined => {
-      const errors = formik.errors.variants;
-      if (Array.isArray(errors) && errors[colorIndex]) {
-        const colorError = errors[colorIndex] as any;
-        if (colorError.subVariants?.[subVariantIndex]?.specifications) {
-          return colorError.subVariants[subVariantIndex].specifications[attributeName];
-        }
+    // ✅ Error: Show snackbar, stay on form
+    if (sellerProduct.error && !sellerProduct.loading) {
+      let errorMsg = 'Failed to save product';
+      if (typeof sellerProduct.error === 'string') {
+        errorMsg = sellerProduct.error;
+      } else if (sellerProduct.error?.message) {
+        errorMsg = sellerProduct.error.message;
+      } else if (sellerProduct.error?.data?.message) {
+        errorMsg = sellerProduct.error.data.message;
       }
-      return undefined;
-    };
+      setSnackbarMessage(errorMsg);
+      setSnackbarSeverity("error");
+      setOpenSnackbar(true);
+      // ✅ Explicitly DO NOT navigate here - keep user on form to fix errors
+    }
+  }, [
+    sellerProduct.productCreated,
+    sellerProduct.productUpdated,
+    sellerProduct.error,
+    sellerProduct.loading,
+    snackbarOpen,  // ✅ Add this dependency
+    dispatch,
+    onClose,
+    mode
+  ]);
 
-    // ✅✅✅ NEW: Get color highlight error
-    const getColorHighlightError = (colorIndex: number, attributeName: string): string | undefined => {
-      const errors = formik.errors.variants;
-      if (Array.isArray(errors) && errors[colorIndex]) {
-        const colorError = errors[colorIndex] as any;
-        if (colorError.highlights) {
-          return colorError.highlights[attributeName];
-        }
-      }
-      return undefined;
-    };
 
-    // ============================================
-    // ✅ RENDER METHODS
-    // ============================================
-    const renderCategoryStep = () => (
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12 }}>
-          <Paper className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <Typography variant="h6" className="font-semibold text-blue-800">📁 Select Product Category</Typography>
-            <Typography variant="body2" className="text-blue-600 mt-1">Choose the most specific category for your product (Level 3)</Typography>
-          </Paper>
-        </Grid>
-        {[
-          { label: "Main Category", field: "category", items: levelOneCategories, disabled: false },
-          { label: "Sub-Category", field: "category2", items: levelTwoCategories, disabled: !formik.values.category },
-          { label: "Product Type", field: "category3", items: levelThreeCategories, disabled: !formik.values.category2 },
-        ].map(({ label, field, items, disabled }) => (
-          <Grid key={field} size={{ xs: 12, sm: 6, lg: 4 }}>
-            <FormControl fullWidth error={Boolean(formik.errors[field as keyof ProductFormValues])} required>
-              <InputLabel id={`${field}-label`}>{label} *</InputLabel>
-              <Select labelId={`${field}-label`} id={field} name={field} value={formik.values[field as keyof ProductFormValues] as string}
-                onChange={formik.handleChange} onBlur={formik.handleBlur} label={`${label} *`} disabled={disabled || mode === "edit"}>
-                <MenuItem value=""><em>Select {label}</em></MenuItem>
-                {items.map((item: Category) => <MenuItem key={item._id} value={item._id}>{item.name}</MenuItem>)}
-              </Select>
-              {formik.errors[field as keyof ProductFormValues] && <FormHelperText error>{String(formik.errors[field as keyof ProductFormValues])}</FormHelperText>}
-            </FormControl>
-          </Grid>
-        ))}
-        {formik.values.category3 && (
-          <Grid size={{ xs: 12 }}>
-            <Paper className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <Typography variant="body2" className="text-green-700">✅ Selected:{" "}
-                {categoryState.categories.find((c: Category) => c._id === formik.values.category)?.name} →{" "}
-                {categoryState.categories.find((c: Category) => c._id === formik.values.category2)?.name} →{" "}
-                <strong>{categoryState.categories.find((c: Category) => c._id === formik.values.category3)?.name}</strong>
-              </Typography>
-            </Paper>
-          </Grid>
-        )}
-        {formik.values.category3 && attributesLoading && (
-          <Grid size={{ xs: 12 }}><Box className="flex items-center gap-2 text-amber-600"><CircularProgress size={20} /><Typography variant="body2">Loading product specifications...</Typography></Box></Grid>
-        )}
-        {mode === "edit" && <Grid size={{ xs: 12 }}><Alert severity="info" variant="outlined">ℹ️ Categories are locked in edit mode. To change categories, create a new product.</Alert></Grid>}
-      </Grid>
+  // ✅✅✅ CRITICAL: Auto-fill categories from catalog (RUNS ONCE)
+  useEffect(() => {
+    // ✅ Guard 1: Only run in "add" mode with catalog product selected
+    if (mode !== "add" || !catalogSearch.isCatalogProduct || !catalogSearch.selectedCatalog) {
+      return;
+    }
+
+    // ✅ Guard 2: Only run ONCE per catalog selection (prevents infinite loop)
+    if (hasProcessedCatalogRef.current) {
+      return;
+    }
+
+    const catalog = catalogSearch.selectedCatalog;
+
+    // ✅ Handle category as ObjectId, slug string, or nested object
+    let level3CategoryId: string | undefined;
+    if (typeof catalog.category === 'string') {
+      level3CategoryId = catalog.category;
+    } else if (catalog.category?._id) {
+      level3CategoryId = catalog.category._id;
+    } else if (catalog.category?.categoryId) {
+      level3CategoryId = catalog.category.categoryId;
+    }
+
+    // ✅ Guard 3: Only proceed if we have a valid category ID
+    if (!level3CategoryId) {
+      console.warn('⚠️ [Auto-fill] No valid category ID found in catalog');
+      return;
+    }
+
+    // ✅ Guard 4: Wait for categories to be loaded before auto-filling
+    if (!categoryState.categories || categoryState.categories.length === 0) {
+      console.log('⏳ [Auto-fill] Waiting for categories to load...');
+      return;  // Will retry when categories are loaded (due to dependency)
+    }
+
+    // ✅ Mark as processed BEFORE setting values (prevents re-entry)
+    hasProcessedCatalogRef.current = true;
+
+    // ✅ Find the Level 3 category object
+    const level3Category = categoryState.categories.find(
+      (c: Category) => c._id === level3CategoryId || c.categoryId === level3CategoryId
     );
 
-    // ✅✅✅ NEW: Render Color-Level Highlights Section (shared across sub-variants)
-    const renderColorHighlightsSection = (colorIndex: number, variant: ProductVariantForm) => {
-      if (highlightAttributes.length === 0) return null;
+    if (!level3Category) {
+      console.warn('⚠️ [Auto-fill] Level 3 category not found in loaded categories');
+      // Fallback: just set the ID
+      formik.setFieldValue('category3', level3CategoryId);
+      setActiveStep(1);
+      return;
+    }
 
-      return (
-        <Paper sx={{ p: 3, mb: 3, bgcolor: 'success.50', border: '1px solid', borderColor: 'success.light' }}>
-          <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'success.main' }}>
-            <CheckCircleIcon color="success" fontSize="small" />
-            🔸 Product Highlights for {variant.color || 'this color'} (Shared Across All Variants)
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block', ml: 3 }}>
-            These values apply to ALL variants of this color. Enter once, used everywhere.
-          </Typography>
-          <Grid container spacing={2}>
-            {highlightAttributes.map((attr: CategoryAttribute) => {
-              const value = colorHighlights[colorIndex]?.[attr.name] || '';
-              const error = getColorHighlightError(colorIndex, attr.name);
+    // ✅ Set Level 3 category
+    formik.setFieldValue('category3', level3Category._id);
 
-              return (
-                <Grid key={attr.name} size={{ xs: 12, sm: 6 }}>
-                  {attr.type === 'select' ? (
-                    <FormControl fullWidth required={attr.required} error={!!error}>
-                      <InputLabel>{attr.label}{attr.required && ' *'}</InputLabel>
-                      <Select
-                        value={value}
-                        onChange={(e) => handleColorHighlightChange(colorIndex, attr.name, e.target.value)}
-                        label={`${attr.label}${attr.required ? ' *' : ''}`}
-                      >
-                        <MenuItem value=""><em>Select {attr.label}</em></MenuItem>
-                        {attr.options?.map((opt: string) => (
-                          <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-                        ))}
-                      </Select>
-                      {error && <FormHelperText>{String(error)}</FormHelperText>}
-                    </FormControl>
-                  ) : attr.type === 'number' ? (
-                    <TextField
-                      fullWidth
-                      label={`${attr.label}${attr.required ? ' *' : ''}`}
-                      type="number"
-                      value={value}
-                      onChange={(e) => handleColorHighlightChange(colorIndex, attr.name, e.target.value)}
-                      required={attr.required}
-                      error={!!error}
-                      helperText={error || ''}
-                      InputProps={{ inputProps: { min: attr.min, max: attr.max, step: attr.step || 1 } }}
-                    />
-                  ) : (
-                    <TextField
-                      fullWidth
-                      label={`${attr.label}${attr.required ? ' *' : ''}`}
-                      value={value}
-                      onChange={(e) => handleColorHighlightChange(colorIndex, attr.name, e.target.value)}
-                      required={attr.required}
-                      error={!!error}
-                      helperText={error || ''}
-                    />
-                  )}
-                </Grid>
-              );
-            })}
-          </Grid>
-        </Paper>
+    // ✅ Find and set Level 2 category (parent of Level 3)
+    if (level3Category.parentCategory) {
+      const level2CategoryId = typeof level3Category.parentCategory === 'object'
+        ? level3Category.parentCategory._id
+        : level3Category.parentCategory;
+
+      const level2Category = categoryState.categories.find(
+        (c: Category) => c._id === level2CategoryId
       );
+
+      if (level2Category) {
+        formik.setFieldValue('category2', level2Category._id);
+
+        // ✅ Find and set Level 1 category (parent of Level 2)
+        if (level2Category.parentCategory) {
+          const level1CategoryId = typeof level2Category.parentCategory === 'object'
+            ? level2Category.parentCategory._id
+            : level2Category.parentCategory;
+
+          const level1Category = categoryState.categories.find(
+            (c: Category) => c._id === level1CategoryId
+          );
+
+          if (level1Category) {
+            formik.setFieldValue('category', level1Category._id);
+          }
+        }
+      }
+    }
+
+    // ✅ Auto-advance to Basic Info step (skip manual category selection)
+    setActiveStep(1);
+
+    return () => {
+      // Only reset if we're unmounting or switching catalogs
+      if (!catalogSearch.selectedCatalog || catalogSearch.selectedCatalog._id !== catalog._id) {
+        hasProcessedCatalogRef.current = false;
+      }
     };
 
-    const renderVariantsSection = () => (
-      <Box sx={{ mt: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">🎨 Color Variants with Storage Options</Typography>
-          <Button startIcon={<AddCircleIcon />} onClick={handleAddColorVariant} variant="outlined" size="small">Add Color</Button>
-        </Box>
-        {formik.values.variants.length === 0 ? (
-          <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'amber.50' }}><Typography>No color variants added yet.</Typography><Typography variant="body2" color="text.secondary">Click "Add Color" to create color variants, then add storage options under each color</Typography></Paper>
-        ) : (
-          <>
-            <Tabs
-              value={activeColorTab}
-              onChange={(_: React.SyntheticEvent, val: number) => setActiveColorTab(val)}
-              variant="scrollable"
-              scrollButtons="auto"
-              sx={{ mb: 2 }}
-            >
-              {formik.values.variants.map((colorVariant, colorIndex) => (
-                <Tab
-                  key={colorIndex}
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <PaletteIcon fontSize="small" />
-                      <Typography variant="body2">
-                        {colorVariant.color || `Color ${colorIndex + 1}`}
-                        {colorVariant.subVariants.length > 0 && ` (${colorVariant.subVariants.length} variants)`}
-                      </Typography>
-                    </Box>
-                  }
-                  icon={
-                    formik.values.variants.length > 1 ? (
-                      <Tooltip title="Remove color variant">
-                        <Box
-                          component="span"
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            handleRemoveColorVariant(colorIndex);
-                          }}
-                          sx={{
-                            ml: 1,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            color: 'error.main',
-                            '&:hover': { opacity: 0.8 }
-                          }}
-                        >
-                          <RemoveCircleIcon fontSize="small" />
-                        </Box>
-                      </Tooltip>
-                    ) : undefined
-                  }
-                  iconPosition="end"
-                />
-              ))}
-            </Tabs>
-            {formik.values.variants[activeColorTab] && (
-              <Paper sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="subtitle1" fontWeight="bold">📦 Storage Variants for {formik.values.variants[activeColorTab].color || 'this color'}</Typography>
-                  <Button startIcon={<AddCircleIcon />} onClick={() => handleAddSubVariant(activeColorTab)} variant="outlined" size="small">Add Storage Variant</Button>
-                </Box>
-                <Grid container spacing={2} sx={{ mb: 3 }}>
-                  <Grid size={{ xs: 12, sm: 6 }}>
-                    <TextField fullWidth label="Color *" value={formik.values.variants[activeColorTab].color}
-                      onChange={(e) => handleColorVariantChange(activeColorTab, 'color', e.target.value)}
-                      error={Boolean(getColorVariantError(activeColorTab, 'color'))}
-                      helperText={getColorVariantError(activeColorTab, 'color') || ''} required placeholder="e.g., Navy Blue, Rose Gold" />
-                  </Grid>
-                </Grid>
-                <Grid size={{ xs: 12 }} sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" gutterBottom>Images for {formik.values.variants[activeColorTab].color || 'this color'} *</Typography>
-                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input type="file" accept="image/*" multiple id={`color-images-${activeColorTab}`} style={{ display: 'none' }} onChange={(e) => handleColorVariantImageUpload(activeColorTab, e.target.files)} />
-                    <label htmlFor={`color-images-${activeColorTab}`}><Button component="span" variant="outlined" startIcon={<AddPhotoAlternateIcon />} disabled={uploadingImage}>{uploadingImage ? <CircularProgress size={20} /> : 'Upload Images'}</Button></label>
-                    <Typography variant="caption" color="text.secondary">These images will be used for all storage variants of this color</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-                    {formik.values.variants[activeColorTab].images.map((img, idx) => (
-                      <Box key={idx} sx={{ position: 'relative' }}><img src={img} alt={`Color ${activeColorTab + 1} - ${idx + 1}`} style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8 }} />
-                        <IconButton size="small" onClick={() => handleRemoveColorVariantImage(activeColorTab, idx)} sx={{ position: 'absolute', top: -8, right: -8, bgcolor: 'white', '&:hover': { bgcolor: 'error.light' } }}><CloseIcon fontSize="small" /></IconButton>
-                      </Box>
-                    ))}
-                  </Box>
-                  {formik.touched.variants?.[activeColorTab] && getColorVariantError(activeColorTab, 'images') && <FormHelperText error>{String(getColorVariantError(activeColorTab, 'images'))}</FormHelperText>}
-                </Grid>
-                <Divider sx={{ mb: 3 }} />
+    // ✅ STABLE dependencies only - includes categories to re-run when they load
+  }, [
+    mode,
+    catalogSearch.isCatalogProduct,
+    catalogSearch.selectedCatalog?._id,
+    catalogSearch.selectedCatalog?.category,
+    categoryState.categories,  // ✅ Re-run when categories load
+    formik.setFieldValue,
+    setActiveStep
+  ]);
 
-                {/* ✅✅✅ NEW: Color-Level Highlights (Enter Once Per Color) */}
-                {renderColorHighlightsSection(activeColorTab, formik.values.variants[activeColorTab])}
+  // ✅ Add this ref at the top of your component (with other useRef declarations)
+  const catalogPrefillExecuted = useRef(false);
 
-                {/* ✅ Filter out toBeDeleted variants from UI */}
-                {formik.values.variants[activeColorTab].subVariants
-                  .filter((subVariant) => !(subVariant as any).toBeDeleted)
-                  .map((subVariant, subIndex) => (
-                    <Accordion key={subVariant._id || subIndex} expanded={expandedSubVariant === subIndex} onChange={() => setExpandedSubVariant(expandedSubVariant === subIndex ? null : subIndex)} sx={{ mb: 2 }}>
-                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
-                          <StorageIcon color="primary" /><Typography variant="subtitle2" fontWeight="bold">{subVariant.specifications?.storage || `Storage Variant ${subIndex + 1}`}{subVariant.specifications?.ram && ` • ${subVariant.specifications.ram}`}</Typography>
-                          <Chip label={`₹${subVariant.sellingPrice || '0'}`} size="small" color="success" variant="outlined" />
-                          {!subVariant.isActive && <Chip label="Inactive" size="small" color="default" />}
-                        </Box>
-                        {formik.values.variants[activeColorTab].subVariants.filter((sv) => !(sv as any).toBeDeleted).length > 1 && (
-                          <Box component="span" onClick={(e) => { e.stopPropagation(); handleRemoveSubVariant(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant)); }} sx={{ cursor: 'pointer', color: 'error.main', display: 'flex', alignItems: 'center', '&:hover': { opacity: 0.8 }, ml: 1 }}><RemoveCircleIcon fontSize="small" /></Box>
-                        )}
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Grid container spacing={2}>
-                          {attributesLoading ? (
-                            <Grid size={{ xs: 12 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <CircularProgress size={20} />
-                                <Typography variant="body2">Loading specifications...</Typography>
-                              </Box>
-                            </Grid>
-                          ) : attributeState.length > 0 ? (
-                            <>
-                              {/* 🔹 SECTION 1: Variant Selector Attributes ONLY (RAM, Storage, etc.) */}
-                              {variantAttributes.length > 0 && (
-                                <Grid size={{ xs: 12 }}>
-                                  <Box sx={{
-                                    p: 2,
-                                    bgcolor: 'primary.50',
-                                    borderRadius: 2,
-                                    border: '1px solid',
-                                    borderColor: 'primary.light',
-                                    mb: 2
-                                  }}>
-                                    <Typography variant="subtitle2" fontWeight="bold" color="primary.main" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <PaletteIcon fontSize="small" />
-                                      🔹 Variant-Specific Fields
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
-                                      These differentiate this variant from others of the same color.
-                                    </Typography>
-                                    <Grid container spacing={2}>
-                                      {variantAttributes.map((attr: CategoryAttribute) => {
-                                        const specValue = subVariant.specifications?.[attr.name];
-                                        const specError = getSubVariantSpecError(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), attr.name);
-                                        const fieldIndex = formik.values.variants[activeColorTab].subVariants.indexOf(subVariant);
-                                        return (
-                                          <Grid key={attr._id || attr.name} size={{ xs: 12, sm: 6 }}>
-                                            {attr.type === 'select' ? (
-                                              <FormControl fullWidth required={attr.required}>
-                                                <InputLabel>{attr.label}{attr.required && ' *'}</InputLabel>
-                                                <Select
-                                                  value={specValue || ''}
-                                                  onChange={(e) => handleSubVariantSpecChange(activeColorTab, fieldIndex, attr.name, e.target.value)}
-                                                  label={`${attr.label}${attr.required ? ' *' : ''}`}
-                                                >
-                                                  <MenuItem value=""><em>Select {attr.label}</em></MenuItem>
-                                                  {attr.options?.map((opt: string) => (
-                                                    <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-                                                  ))}
-                                                </Select>
-                                                {specError && <FormHelperText error>{String(specError)}</FormHelperText>}
-                                              </FormControl>
-                                            ) : attr.type === 'number' ? (
-                                              <TextField
-                                                fullWidth
-                                                label={`${attr.label}${attr.required ? ' *' : ''}`}
-                                                type="number"
-                                                value={specValue || ''}
-                                                onChange={(e) => handleSubVariantSpecChange(activeColorTab, fieldIndex, attr.name, e.target.value ? Number(e.target.value) : '')}
-                                                required={attr.required}
-                                                InputProps={{ inputProps: { min: attr.min, max: attr.max, step: attr.step || 1 } }}
-                                              />
-                                            ) : (
-                                              <TextField
-                                                fullWidth
-                                                label={`${attr.label}${attr.required ? ' *' : ''}`}
-                                                value={specValue || ''}
-                                                onChange={(e) => handleSubVariantSpecChange(activeColorTab, fieldIndex, attr.name, e.target.value)}
-                                                required={attr.required}
-                                              />
-                                            )}
-                                          </Grid>
-                                        );
-                                      })}
-                                    </Grid>
-                                  </Box>
-                                </Grid>
-                              )}
-
-                              {/* ✅ Price/Stock fields remain unchanged below the attribute sections */}
-                              <Grid size={{ xs: 12, sm: 6 }}>
-                                <TextField
-                                  fullWidth
-                                  label="MRP Price (₹) *"
-                                  type="number"
-                                  value={subVariant.mrpPrice}
-                                  onChange={(e) => handleSubVariantChange(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'mrpPrice', e.target.value)}
-                                  error={Boolean(getSubVariantError(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'mrpPrice'))}
-                                  helperText={getSubVariantError(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'mrpPrice') || ''}
-                                  InputProps={{ inputProps: { min: 0, step: "0.01" } }}
-                                />
-                              </Grid>
-                              <Grid size={{ xs: 12, sm: 6 }}>
-                                <TextField
-                                  fullWidth
-                                  label="Selling Price (₹) *"
-                                  type="number"
-                                  value={subVariant.sellingPrice}
-                                  onChange={(e) => handleSubVariantChange(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'sellingPrice', e.target.value)}
-                                  error={Boolean(getSubVariantError(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'sellingPrice'))}
-                                  helperText={getSubVariantError(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'sellingPrice') || ''}
-                                  InputProps={{ inputProps: { min: 0, step: "0.01" } }}
-                                />
-                              </Grid>
-                              <Grid size={{ xs: 12, sm: 6 }}>
-                                <TextField
-                                  fullWidth
-                                  label="Stock Quantity"
-                                  type="number"
-                                  value={subVariant.stock}
-                                  onChange={(e) => handleSubVariantChange(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'stock', e.target.value)}
-                                  InputProps={{ inputProps: { min: 0 } }}
-                                />
-                              </Grid>
-                              <Grid size={{ xs: 12, sm: 6 }}>
-                                <TextField
-                                  fullWidth
-                                  label="SKU (Optional)"
-                                  value={subVariant.sku || ''}
-                                  onChange={(e) => handleSubVariantChange(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'sku', e.target.value)}
-                                  placeholder="Auto-generated if empty"
-                                />
-                              </Grid>
-                              <Grid size={{ xs: 12 }}>
-                                <FormControlLabel
-                                  control={
-                                    <Switch
-                                      checked={subVariant.isActive !== false}
-                                      onChange={(e) => handleSubVariantChange(activeColorTab, formik.values.variants[activeColorTab].subVariants.indexOf(subVariant), 'isActive', e.target.checked)}
-                                    />
-                                  }
-                                  label="Active (visible to customers)"
-                                />
-                              </Grid>
-                            </>
-                          ) : (
-                            <Grid size={{ xs: 12 }}>
-                              <Typography variant="body2" color="text.secondary">
-                                No additional specifications configured for this category
-                              </Typography>
-                            </Grid>
-                          )}
-                        </Grid>
-                      </AccordionDetails>
-                    </Accordion>
-                  ))}
-              </Paper>
-            )}
-          </>
-        )}
-      </Box>
-    );
-
-    const renderBasicInfoStep = () => (
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12 }}><Paper className="p-4 bg-purple-50 border border-purple-200 rounded-lg"><Typography variant="h6" className="font-semibold text-purple-800">📝 {mode === "edit" ? "Update" : "Basic"} Product Information</Typography><Typography variant="body2" className="text-purple-600 mt-1">{mode === "edit" ? "Update product details and variants" : "Enter the core details for your product"}</Typography></Paper></Grid>
-        <Grid size={{ xs: 12 }}><TextField fullWidth id="title" name="title" label="Product Title *" value={formik.values.title} onChange={(e) => formik.setFieldValue('title', e.target.value)} onBlur={formik.handleBlur} error={formik.touched.title && Boolean(formik.errors.title)} helperText={formik.touched.title && formik.errors.title ? String(formik.errors.title) : ""} required /></Grid>
-        <Grid size={{ xs: 12 }}><TextField multiline rows={4} fullWidth id="description" name="description" label="Description *" value={formik.values.description} onChange={(e) => formik.setFieldValue('description', e.target.value)} onBlur={formik.handleBlur} error={formik.touched.description && Boolean(formik.errors.description)} helperText={formik.touched.description && formik.errors.description ? String(formik.errors.description) : ""} required /></Grid>
-        <Grid size={{ xs: 12 }}><Divider sx={{ my: 2 }} />{renderVariantsSection()}</Grid>
-      </Grid>
-    );
-
-    const renderReviewStep = () => (
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12 }}><Paper className="p-4 bg-green-50 border border-green-200 rounded-lg"><Typography variant="h6" className="font-semibold text-green-800">✅ Review & Submit</Typography><Typography variant="body2" className="text-green-600 mt-1">Review your product details before submitting</Typography></Paper></Grid>
-        <Grid size={{ xs: 12 }}><Paper sx={{ p: 3, bgcolor: 'grey.50' }}><Typography variant="subtitle1" fontWeight="bold" gutterBottom>📦 Product Summary</Typography><Grid container spacing={2}><Grid size={{ xs: 6 }}><Typography variant="body2" color="text.secondary">Title:</Typography><Typography variant="body1">{formik.values.title || 'N/A'}</Typography></Grid><Grid size={{ xs: 6 }}></Grid>{mode !== "edit" && (<Grid size={{ xs: 12 }}><Typography variant="body2" color="text.secondary">Category:</Typography><Typography variant="body1">{categoryState.categories.find((c: Category) => c._id === formik.values.category)?.name} →{categoryState.categories.find((c: Category) => c._id === formik.values.category2)?.name} →<strong>{categoryState.categories.find((c: Category) => c._id === formik.values.category3)?.name}</strong></Typography></Grid>)}<Grid size={{ xs: 12 }}><Typography variant="body2" color="text.secondary">Description:</Typography><Typography variant="body1" className="line-clamp-3">{formik.values.description || 'N/A'}</Typography></Grid></Grid></Paper></Grid>
-        <Grid size={{ xs: 12 }}><Paper sx={{ p: 3, bgcolor: 'grey.50' }}><Typography variant="subtitle1" fontWeight="bold" gutterBottom>🎨 Color Variants ({formik.values.variants.length})</Typography>{formik.values.variants.map((colorVariant, colorIndex) => (<Box key={colorIndex} sx={{ mb: 3, p: 2, bgcolor: 'white', borderRadius: 1, border: '1px solid #e0e0e0' }}><Typography variant="body2" fontWeight="bold" color="primary">Color: {colorVariant.color || 'N/A'}</Typography><Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>Storage Options: {colorVariant.subVariants.length} | Images: {colorVariant.images.length}</Typography>{colorVariant.subVariants.map((subVar, subIndex) => (<Box key={subIndex} sx={{ ml: 4, mt: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}><Typography variant="body2">{subVar.specifications?.storage || 'N/A'} |{subVar.specifications?.ram || 'N/A'} |₹{subVar.sellingPrice} |Stock: {subVar.stock}</Typography></Box>))}</Box>))}</Paper></Grid>
-        <Grid size={{ xs: 12 }}><Alert severity="info">✅ All category-specific specifications (RAM, Storage, etc.) are configured per sub-variant. Product Highlights (Processor, Warranty) are shared across all variants of the same color.</Alert></Grid>
-      </Grid>
-    );
-
-    const steps = mode === "edit" ? ["Product Details & Variants", "Review & Submit"] : ["Select Category", "Basic Information & Variants", "Review & Submit"];
-
-    // ============================================
-    // ✅ JSX RETURN
-    // ============================================
-    return (
-      <div className="p-4">
-        {mode !== "edit" && (<Stepper activeStep={activeStep} className="mb-6" alternativeLabel>{steps.map((label, index) => <Step key={index}><StepLabel>{label}</StepLabel></Step>)}</Stepper>)}
-        {mode === "edit" && (<Box sx={{ mb: 4 }}><Typography variant="h5" fontWeight="bold">✏️ Edit Product: {formik.values.title || 'Loading...'}</Typography><Typography variant="body2" color="text.secondary">Update variant details, prices, and stock. Categories cannot be changed.</Typography></Box>)}
-        <form onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); const finalStep = mode === "edit" ? 1 : 2; if (activeStep !== finalStep) { console.log('⛔ Submission blocked - not on final step', { activeStep }); return; } console.log('✅ Step confirmed - proceeding with formik submit'); formik.handleSubmit(e); }} onKeyDown={(e) => { const finalStep = mode === "edit" ? 1 : 2; if (e.key === 'Enter' && activeStep !== finalStep) { e.preventDefault(); e.stopPropagation(); } }}>
-          <Grid container spacing={2}>
-            {activeStep === 0 && mode !== "edit" && renderCategoryStep()}
-            {((activeStep === 0 && mode === "edit") || (activeStep === 1 && mode !== "edit")) && renderBasicInfoStep()}
-            {((mode === "edit" && activeStep === 1) || (mode !== "edit" && activeStep === 2)) && renderReviewStep()}
-            <Grid size={12} className="flex justify-between mt-6">
-              <Button type="button" disabled={(mode === "edit" && activeStep === 0) || (mode !== "edit" && activeStep === 0)} onClick={handleBack} variant="outlined">Back</Button>
-              {activeStep === steps.length - 1 ? (
-                <Button sx={{ px: 4, py: 1.5 }} color="primary" variant="contained" type="button"
-                  disabled={sellerProduct.loading || !isStepValid(activeStep) || attributesLoading}
-                  onClick={() => {
-                    console.log('🎯 Submit button clicked');
-                    if (sellerProduct.loading) { console.log('⛔ Submit blocked - already loading'); return; }
-                    const formElement = document.querySelector('form');
-                    if (formElement) {
-                      requestAnimationFrame(() => {
-                        console.log('✅ Triggering form submit event');
-                        formElement.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                      });
-                    }
-                  }}>
-                  {sellerProduct.loading ? <CircularProgress size={24} color="inherit" /> : mode === "edit" ? "✅ Update Product" : "🚀 Add Product"}
-                </Button>
-              ) : (<Button type="button" sx={{ px: 4, py: 1.5 }} variant="contained" onClick={handleNext} disabled={!isStepValid(activeStep)}>Next</Button>)}
+  return (
+    <div className="p-4">
+      {mode !== "edit" && (
+        <Stepper activeStep={activeStep} className="mb-6" alternativeLabel>
+          {steps.map((label, index) => (
+            <Step key={index}>
+              <StepLabel>
+                {label}
+                {activeStep === 1 && catalogSearch.isCatalogProduct && (
+                  <Chip
+                    label="📦 Shared Product"  // ✅ Simpler label
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                    sx={{ ml: 1 }}
+                  />
+                )}
+              </StepLabel>
+            </Step>
+          ))}
+        </Stepper>
+      )}
+      <form onSubmit={formik.handleSubmit}
+        noValidate
+        onKeyDown={(e: React.KeyboardEvent<HTMLFormElement>) => {
+          if (e.key === 'Enter' && activeStep < 2) {
+            console.log('⌨️ [BLOCKED] Enter key on Step', activeStep + 1, '- preventing submit');
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          }
+        }}
+      >
+        <Grid container spacing={2}>
+          {/* Step 0: Catalog Search or Category Selection */}
+          {activeStep === 0 && mode !== "edit" && catalogSearch.showSearch ? (
+            <CatalogSearchStep
+              searchQuery={catalogSearch.searchQuery}
+              results={catalogSearch.results}
+              isSearching={catalogSearch.isSearching}
+              selectedCatalog={catalogSearch.selectedCatalog}
+              onSearchQueryChange={catalogSearch.setSearchQuery}
+              onSearch={catalogSearch.handleSearchCatalog}
+              onSelectCatalog={catalogSearch.handleSelectCatalog}
+              onSkip={catalogSearch.handleSkipCatalogSearch}
+              onNext={handleNext}
+            />
+          ) : activeStep === 0 && mode !== "edit" ? (
+            <CategoryStep
+              formik={formik}
+              categories={categoryState.categories || []}
+              levelOneCategories={levelOneCategories}
+              levelTwoCategories={levelTwoCategories}
+              levelThreeCategories={levelThreeCategories}
+              isCatalogProduct={catalogSearch.isCatalogProduct}
+              selectedCatalog={catalogSearch.selectedCatalog}
+            />
+          ) : (activeStep === 0 && mode === "edit") || (activeStep === 1 && mode !== "edit") ? (
+            <BasicInfoStep
+              formik={formik}
+              catalogSearch={catalogSearch}
+              isCatalogProduct={catalogSearch.isCatalogProduct}
+              selectedCatalog={catalogSearch.selectedCatalog}
+              categories={categoryState.categories || []}
+              levelOneCategories={levelOneCategories}
+              levelTwoCategories={levelTwoCategories}
+              levelThreeCategories={levelThreeCategories}
+            />
+          ) : (
+            <ReviewStep
+              formik={formik}
+              categories={categoryState.categories || []}
+              isCatalogProduct={catalogSearch.isCatalogProduct}
+            />
+          )}
+          {/* Variants Section - ALWAYS editable for price/stock */}
+          {((activeStep === 0 && mode === "edit") || (activeStep === 1 && mode !== "edit")) && (
+            <Grid size={{ xs: 12 }}>
+              <VariantsSection
+                formik={formik}
+                variants={formik.values.variants}
+                activeColorTab={activeColorTab}
+                onAddColor={handleAddColorVariant}
+                onRemoveColor={handleRemoveColorVariant}
+                onColorTabChange={setActiveColorTab}
+                onColorChange={(idx, val) => handleColorVariantChange(idx, 'color', val)}
+                onImageUpload={handleColorVariantImageUpload}
+                onRemoveImage={handleRemoveColorVariantImage}
+                isCatalogProduct={catalogSearch.isCatalogProduct}
+                onAddSubVariant={handleAddSubVariant}
+                onRemoveSubVariant={handleRemoveSubVariant}
+                onSubVariantChange={handleSubVariantChange}
+                onSubVariantSpecChange={handleSubVariantSpecChange}
+                // ✅ ADD THESE NEW PROPS for offers management:
+                onAddOffer={handleAddOffer}
+                onRemoveOffer={handleRemoveOffer}
+                onOfferChange={handleOfferChange}
+                // ✅ Pass current user for offer creation:
+                expandedSubVariant={expandedSubVariant}
+                onExpandedSubVariantChange={setExpandedSubVariant}
+                colorHighlights={colorHighlights}
+                onColorHighlightChange={handleColorHighlightChange}
+              >
+              </VariantsSection>
             </Grid>
-            {onClose && activeStep === 0 && mode !== "edit" && (<Grid size={12}><Button type="button" onClick={onClose} color="secondary" fullWidth variant="outlined">Cancel</Button></Grid>)}
+          )}
+          {/* Navigation Buttons */}
+          <Grid size={12} className="flex justify-between mt-6">
+            <Button
+              type="button"
+              disabled={activeStep === 0}
+              onClick={handleBack}
+              variant="outlined"
+            >
+              Back
+            </Button>
+            {activeStep === 2 ? (
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={sellerProduct.loading || !isStepValid(activeStep) || isSubmittingRef.current}
+                // ✅✅✅ CRITICAL: Mark this as intentional user submit
+                onClick={() => {
+                  isUserSubmittedRef.current = true;
+                  console.log('🎯 User clicked "Add Product" - intentional submit');
+
+                  // ✅ Clear any existing navigation timer
+                  if ((window as any).__navTimer) {
+                    clearTimeout((window as any).__navTimer);
+                    (window as any).__navTimer = null;
+                  }
+
+                  const checkAndNavigate = () => {
+                    // ✅ ONLY navigate if product was created successfully AND no error
+                    if (sellerProduct.productCreated && !sellerProduct.loading && !sellerProduct.error) {
+                      console.log('✅ [BUTTON NAVIGATION] Product created - navigating now');
+
+                      // Show success message
+                      setSnackbarMessage("🎉 Product created successfully!");
+                      setSnackbarSeverity("success");
+                      setOpenSnackbar(true);
+
+                      // ✅ Reset flags AFTER navigation is triggered
+                      dispatch(resetCreateFlag());
+
+                      // ✅ Navigate with short delay
+                      const navTimer = setTimeout(() => {
+                        try {
+                          console.log('🔄 [NAVIGATION] Executing navigate()');
+                          // navigate('/products');
+
+                          // // ✅ Fallback: force reload if navigate doesn't work
+                          // setTimeout(() => {
+                          //   if (!window.location.pathname.includes('/seller/products')) {
+                          //     console.log('⚠️ Navigate didn\'t work, forcing redirect');
+                          //     window.location.href = '/seller/products';
+                          //   }
+                          // }, 300);
+                        } catch (navError) {
+                          console.error('❌ Navigation failed:', navError);
+                          // window.location.href = '/seller/products';
+                        }
+                      }, 100);
+
+                      return () => clearTimeout(navTimer);
+                    }
+                  };
+
+                  // ✅ Poll for productCreated status (check every 100ms for up to 3 seconds)
+                  let attempts = 0;
+                  const maxAttempts = 30; // 30 × 100ms = 3 seconds max wait
+                  const pollInterval = setInterval(() => {
+                    attempts++;
+
+                    // ✅✅✅ CRITICAL: Check for error FIRST - if error exists, STOP and DON'T navigate
+                    if (sellerProduct.error && !sellerProduct.loading) {
+                      clearInterval(pollInterval);
+                      console.log('❌ [NAVIGATION BLOCKED] Product creation failed with error:', sellerProduct.error);
+                      // ✅ Keep user on form to fix errors - DO NOT navigate
+                      return;
+                    }
+
+                    // ✅ Only navigate on explicit success
+                    if (sellerProduct.productCreated && !sellerProduct.loading) {
+                      clearInterval(pollInterval);
+                      checkAndNavigate();
+                      return;
+                    }
+
+                    // ✅ Timeout fallback: only force redirect if NO error AND no success
+                    if (attempts >= maxAttempts) {
+                      clearInterval(pollInterval);
+
+                      if (sellerProduct.error) {
+                        console.log('❌ [TIMEOUT] Failed with error - staying on form');
+                        return; // ✅ Don't navigate on error
+                      }
+
+                      if (!sellerProduct.productCreated) {
+                        console.log('⚠️ [TIMEOUT] No response after 3s - forcing redirect');
+                        // Only force redirect as last resort when no error but no success either
+                        // window.location.href = '/seller/products';
+                      }
+                    }
+                  }, 100);
+
+                  // ✅ Cleanup on component unmount
+                  return () => {
+                    clearInterval(pollInterval);
+                    if ((window as any).__navTimer) {
+                      clearTimeout((window as any).__navTimer);
+                    }
+                  };
+                }}
+              >
+                {sellerProduct.loading ? (
+                  <CircularProgress size={24} color="inherit" />
+                ) : sellerProduct.productCreated ? (
+                  "✅ Redirecting..."
+                ) : mode === "edit" ? "✅ Update Product" :
+                  catalogSearch.isCatalogProduct ? "📦 List Offer" : "🚀 Add Product"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="contained"
+                onClick={handleNext}
+                disabled={!isStepValid(activeStep)}
+              >
+                Next
+              </Button>
+            )}
           </Grid>
-        </form>
-        <Snackbar anchorOrigin={{ vertical: "top", horizontal: "right" }} open={snackbarOpen} autoHideDuration={6000} onClose={handleCloseSnackbar}>
-          <Alert onClose={handleCloseSnackbar} severity={sellerProduct.error ? "error" : "success"} variant="filled" sx={{ width: "100%" }}>
-            {(() => { const err = sellerProduct.error; if (!err) return mode === "edit" ? "Product updated successfully!" : "Product created successfully!"; if (typeof err === 'string') return err; if (typeof err === 'object' && err !== null) { const errorObj = err as { message?: string; errors?: string[] }; if (errorObj.message) return String(errorObj.message); if (errorObj.errors && Array.isArray(errorObj.errors)) return errorObj.errors.join(', '); return JSON.stringify(err); } return "An error occurred"; })()}
-          </Alert>
-        </Snackbar>
-      </div>
-    );
-  };
+          {onClose && activeStep === 0 && mode !== "edit" && (
+            <Grid size={12}>
+              <Button type="button" onClick={onClose} color="secondary" fullWidth variant="outlined">
+                Cancel
+              </Button>
+            </Grid>
+          )}
+        </Grid>
+      </form>
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={() => setOpenSnackbar(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          severity={snackbarSeverity}  // ✅ Use local state
+          onClose={() => setOpenSnackbar(false)}
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}  // ✅ Use local state directly
+        </Alert>
+      </Snackbar>
+
+    </div>
+  );
+};
 
 export default AddProductForm;

@@ -15,6 +15,7 @@ import AddIcon from '@mui/icons-material/Add';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import PaletteIcon from '@mui/icons-material/Palette';
 import MemoryIcon from '@mui/icons-material/Memory';
+import StoreIcon from '@mui/icons-material/Store'; // ✅ NEW: For seller offers
 import SmilarProduct from '../SimilarProduct/SmilarProduct';
 import ZoomableImage from './ZoomableImage';
 import { useAppDispatch, useAppSelector } from '../../../../Redux Toolkit/Store';
@@ -72,6 +73,60 @@ const ProductDetails = () => {
     const [snackbarMessage, setSnackbarMessage] = useState('');
     const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
 
+    // ============================================
+    // ✅ NEW STATE for Seller Selection (Multi-Seller Catalog)
+    // ============================================
+    const [selectedSellerOffer, setSelectedSellerOffer] = useState<any>(null);
+    const [allSellerOffers, setAllSellerOffers] = useState<any[]>([]);
+    const [selectedSellerId, setSelectedSellerId] = useState<string>('');
+    const [isCatalogProduct, setIsCatalogProduct] = useState(false);
+    const [catalogLoading, setCatalogLoading] = useState(false);
+
+    // ✅ NEW: Get product reference (moved BEFORE useEffects that use it)
+    const product = products.product;
+
+    // ============================================
+    // ✅ NEW: Fetch All Seller Offers for Catalog Products
+    // ============================================
+    useEffect(() => {
+        const fetchCatalogOffers = async () => {
+            // Check if product is linked to a catalog
+            if (product?.catalog?._id) {
+                setIsCatalogProduct(true);
+                setCatalogLoading(true);
+
+                try {
+                    const response = await fetch(`/api/catalog/${product.catalog._id}`, {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await response.json();
+
+                    if (data.success && data.data.offers?.length > 0) {
+                        setAllSellerOffers(data.data.offers);
+
+                        // Default to lowest price seller
+                        const lowestOffer = data.data.offers.reduce((min: any, offer: any) =>
+                            offer.minPrice < min.minPrice ? offer : min
+                        );
+                        setSelectedSellerOffer(lowestOffer);
+
+                        console.log('✅ Catalog offers loaded:', data.data.offers.length);
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to fetch catalog offers:', error);
+                } finally {
+                    setCatalogLoading(false);
+                }
+            } else {
+                setIsCatalogProduct(false);
+                setAllSellerOffers([]);
+                setSelectedSellerOffer(null);
+            }
+        };
+
+        fetchCatalogOffers();
+    }, [product?.catalog?._id]);
+
     // ✅ DEBUG: Log JWT and attribute state
     useEffect(() => {
         const jwt = localStorage.getItem('jwt');
@@ -84,49 +139,76 @@ const ProductDetails = () => {
 
     // ✅ Fetch data on mount
     useEffect(() => {
+        let checkCategoriesInterval: NodeJS.Timeout | undefined;
+        let isMounted = true; // ✅ Track component mount status
+
+        // ✅ Fetch product and reviews (only if productId exists)
         if (productId) {
             dispatch(fetchProductById(productId));
             dispatch(fetchReviewsByProductId({ productId }));
         }
 
+        // ✅ Fetch category attributes (only if categoryId exists)
         if (categoryId) {
+            // Fetch similar products for the category
             dispatch(getAllProducts({ category: categoryId }));
 
-            // Find category slug from Redux state
-            const cats = categoryState?.categories || [];
-            const category = cats.find((cat: Category) => cat._id === categoryId);
+            // Helper function to fetch attributes if slug is available
+            const fetchAttributesIfSlugExists = (cats: Category[]) => {
+                const foundCategory = cats.find((cat: Category) => cat._id === categoryId);
 
-            if (category?.categoryId) {
-                const slug = category.categoryId;
-                console.log('✅ Category slug:', slug);
-                dispatch(fetchCategoryAttributes({
-                    categoryId: slug,
-                    includeInactive: false
-                }));
-            } else {
-                // Wait for categories to load
-                const checkCategories = setInterval(() => {
-                    const updatedCats = categoryState?.categories || [];
-                    const foundCategory = updatedCats.find((cat: Category) => cat._id === categoryId);
+                if (foundCategory?.categoryId) {
+                    const slug = foundCategory.categoryId;
+                    console.log('✅ Category slug found:', slug);
 
-                    if (foundCategory?.categoryId) {
-                        clearInterval(checkCategories);
-                        const slug = foundCategory.categoryId;
+                    // ✅ Guard: Only fetch if not already loading and not already loaded
+                    if (!attributeState.loading && attributeState.length === 0) {
                         dispatch(fetchCategoryAttributes({
                             categoryId: slug,
                             includeInactive: false
                         }));
                     }
-                }, 500);
+                    return true; // ✅ Slug found and handled
+                }
+                return false; // ✅ Slug not found yet
+            };
 
-                return () => clearInterval(checkCategories);
+            // ✅ Try immediate fetch first
+            const cats = categoryState?.categories || [];
+            const handled = fetchAttributesIfSlugExists(cats);
+
+            // ✅ If slug not found, poll for categories to load
+            if (!handled && isMounted) {
+                checkCategoriesInterval = setInterval(() => {
+                    if (!isMounted) {
+                        clearInterval(checkCategoriesInterval);
+                        return;
+                    }
+
+                    const updatedCats = categoryState?.categories || [];
+                    const wasHandled = fetchAttributesIfSlugExists(updatedCats);
+
+                    // ✅ Stop polling once handled
+                    if (wasHandled && checkCategoriesInterval) {
+                        clearInterval(checkCategoriesInterval);
+                        checkCategoriesInterval = undefined;
+                    }
+                }, 500);
             }
         }
-    }, [productId, categoryId, dispatch, categoryState?.categories]);
+
+        // ✅ Cleanup function - ALWAYS runs on unmount or dependency change
+        return () => {
+            isMounted = false;
+            if (checkCategoriesInterval) {
+                clearInterval(checkCategoriesInterval);
+                checkCategoriesInterval = undefined;
+            }
+        };
+    }, [productId, categoryId, dispatch, categoryState?.categories, attributeState.loading, attributeState.length]);
 
     // ✅ Auto-select first variant
     useEffect(() => {
-        const product = products.product;
         if (product?.variants && product.variants.length > 0 && !selectedColor) {
             const firstActiveVariant = product.variants.find(v => v.isActive !== false);
             if (firstActiveVariant) {
@@ -137,7 +219,66 @@ const ProductDetails = () => {
                 }
             }
         }
-    }, [products.product?.variants]);
+    }, [product?.variants]);
+
+    // ============================================
+    // ✅ NEW: Render Seller Offers Section (Multi-Seller)
+    // ============================================
+    const renderSellerOffers = () => {
+        if (!isCatalogProduct || !selectedVariantId || availableSellersForVariant.length === 0) return null;
+
+        return (
+            <Paper sx={{ p: 3, mt: 3, bgcolor: 'warning.50', border: '1px solid', borderColor: 'warning.light' }}>
+                <Typography variant="h6" fontWeight="bold" gutterBottom>
+                    🏪 Select Seller for this Variant ({availableSellersForVariant.length})
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Select a seller to view their price and stock. All sellers offer the same product quality.
+                </Typography>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {allSellerOffers.map((offer) => {
+                        const isSelected = selectedSellerOffer?._id === offer._id;
+                        const lowestPrice = Math.min(...offer.variants.map((v: any) => v.sellingPrice));
+
+                        return (
+                            <Box
+                                key={offer._id}
+                                onClick={() => setSelectedSellerOffer(offer)}
+                                sx={{
+                                    p: 2,
+                                    border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
+                                    borderRadius: 2,
+                                    cursor: 'pointer',
+                                    bgcolor: isSelected ? '#fff8e1' : 'white',
+                                    '&:hover': { borderColor: '#ff9f00', boxShadow: 1 }
+                                }}
+                            >
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <Box>
+                                        <Typography variant="subtitle1" fontWeight="bold">
+                                            {offer.seller?.businessDetails?.businessName || offer.seller?.sellerName}
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            ✓ {offer.variants.length} variants available
+                                        </Typography>
+                                    </Box>
+                                    <Box sx={{ textAlign: 'right' }}>
+                                        <Typography variant="h6" fontWeight="bold" color="primary">
+                                            ₹{lowestPrice.toLocaleString()}
+                                        </Typography>
+                                        {isSelected && (
+                                            <Chip label="Selected" size="small" color="success" sx={{ mt: 0.5 }} />
+                                        )}
+                                    </Box>
+                                </Box>
+                            </Box>
+                        );
+                    })}
+                </Box>
+            </Paper>
+        );
+    };
 
     // ✅ Separate attributes by type
     const { variantAttributes, highlightAttributes } = useMemo(() => {
@@ -177,21 +318,31 @@ const ProductDetails = () => {
         return { variantAttributes: variantAttrs, highlightAttributes: highlightAttrs };
     }, [attributeState]);
 
+    // ✅ UPDATED: Use selected seller's variants for catalog products
     const currentVariant = useMemo(() => {
-        const product = products.product;
+        if (isCatalogProduct && selectedSellerOffer) {
+            // For catalog products, use selected seller's variants
+            if (!selectedVariantId) return null;
+            return selectedSellerOffer.variants?.find((v: any) =>
+                v._id === selectedVariantId && v.isActive !== false
+            ) || null;
+        }
+
+        // For independent products, use product's variants (existing logic)
         if (!product?.variants || !selectedVariantId) return null;
         return product.variants.find(v =>
             v._id === selectedVariantId && v.isActive !== false
         ) || null;
-    }, [products.product?.variants, selectedVariantId]);
+    }, [isCatalogProduct, selectedSellerOffer, product?.variants, selectedVariantId]);
 
     const colorsWithImages = useMemo(() => {
-        const product = products.product;
-        if (!product?.variants || !product.variants.length) return [];
-        const colorMap = new Map<string, { color: string; images: string[]; variants: ProductVariant[] }>();
-        product.variants
-            .filter((v: ProductVariant) => v.isActive !== false && v.color)
-            .forEach((v: ProductVariant) => {
+        const sourceProduct = isCatalogProduct && selectedSellerOffer ? selectedSellerOffer : product;
+        if (!sourceProduct?.variants || !sourceProduct.variants.length) return [];
+
+        const colorMap = new Map<string, { color: string; images: string[]; variants: any[] }>();
+        sourceProduct.variants
+            .filter((v: any) => v.isActive !== false && v.color)
+            .forEach((v: any) => {
                 if (!colorMap.has(v.color)) {
                     colorMap.set(v.color, {
                         color: v.color,
@@ -202,31 +353,43 @@ const ProductDetails = () => {
                 colorMap.get(v.color)!.variants.push(v);
             });
         return Array.from(colorMap.values());
-    }, [products.product?.variants]);
+    }, [isCatalogProduct, selectedSellerOffer, product?.variants]);
 
     const availableVariantsForColor = useMemo(() => {
-        const product = products.product;
-        if (!product?.variants || !selectedColor) return [];
-        return product.variants.filter((v: ProductVariant) =>
-            v.isActive !== false &&
-            v.color?.toLowerCase() === selectedColor.toLowerCase()
+        if (!selectedColor) return [];
+        // Get all variants from all sellers that match the color
+        const allVariants = isCatalogProduct
+            ? allSellerOffers.flatMap(offer => offer.variants || [])
+            : product?.variants || [];
+
+        return allVariants.filter((v: any) =>
+            v.color?.toLowerCase() === selectedColor.toLowerCase() && v.isActive !== false
         );
-    }, [products.product?.variants, selectedColor]);
+    }, [selectedColor, isCatalogProduct, allSellerOffers, product?.variants]);
+
+    const availableSellersForVariant = useMemo(() => {
+        if (!selectedVariantId || !isCatalogProduct) return [];
+
+        return allSellerOffers.filter((offer: any) =>
+            offer.variants?.some((v: any) => v._id === selectedVariantId && v.stock > 0)
+        );
+    }, [selectedVariantId, isCatalogProduct, allSellerOffers]);
 
     const displayImages = useMemo(() => {
-        const product = products.product;
-        if (!product) return [];
+        const sourceProduct = isCatalogProduct && selectedSellerOffer ? selectedSellerOffer : product;
+        if (!sourceProduct) return [];
+
         if (currentVariant?.images && currentVariant.images.length > 0) {
             return currentVariant.images.filter((img: string) => img && img.trim() !== '');
         }
-        if (selectedColor && product.variants) {
+        if (selectedColor && sourceProduct.variants) {
             const colorData = colorsWithImages.find(c => c.color === selectedColor);
             if (colorData?.images && colorData.images.length > 0) {
                 return colorData.images;
             }
         }
-        return (product.images || []).filter((img: string) => img && img.trim() !== '');
-    }, [products.product, currentVariant, selectedColor, colorsWithImages]);
+        return (sourceProduct.images || []).filter((img: string) => img && img.trim() !== '');
+    }, [isCatalogProduct, selectedSellerOffer, product, currentVariant, selectedColor, colorsWithImages]);
 
     const handleColorSelect = useCallback((color: string, variantId?: string) => {
         setSelectedColor(color);
@@ -246,11 +409,14 @@ const ProductDetails = () => {
 
     const handleSpecSelect = useCallback((attrName: string, value: string) => {
         setSelectedSpecs(prev => ({ ...prev, [attrName]: value }));
-        const matchingVariant = availableVariantsForColor.find(v =>
+
+        // ✅ Add type annotation: (v: ProductVariant)
+        const matchingVariant = availableVariantsForColor.find((v: ProductVariant) =>
             Object.entries({ ...selectedSpecs, [attrName]: value }).every(
                 ([key, val]) => v.specifications?.[key] === val
             )
         );
+
         if (matchingVariant) {
             setSelectedVariantId(matchingVariant._id || '');
         }
@@ -283,8 +449,9 @@ const ProductDetails = () => {
         }
         const cartRequest = {
             productId: productId,
-            size: "FREE",
             quantity: quantity,
+            variantId: currentVariant._id,
+            sellerId: isCatalogProduct ? selectedSellerId : undefined,
             ...(currentVariant._id && { variantId: currentVariant._id }),
             ...(selectedColor && { color: selectedColor }),
             ...(Object.keys(selectedSpecs).length > 0 && { specifications: selectedSpecs }),
@@ -310,121 +477,118 @@ const ProductDetails = () => {
         (e.target as HTMLImageElement).src = placeholder;
     };
 
-    const product = products.product;
+    // ✅✅✅ FIXED: Render Flipkart-Style Variant Cards with Price Display
+    const renderVariantAttributeSelectors = () => {
+        if (!product || variantAttributes.length === 0 || !selectedColor) return null;
 
-// ✅✅✅ FIXED: Render Flipkart-Style Variant Cards with Price Display
-const renderVariantAttributeSelectors = () => {
-  // ✅ Add null check for product
-  if (!product || variantAttributes.length === 0 || !selectedColor) return null;
-  
-  return (
-    <Box sx={{ mb: 4 }}>
-      <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <MemoryIcon fontSize="small" color="primary" />
-        Variant: {currentVariant ? `${currentVariant.specifications?.[variantAttributes[0]?.name]} + ${currentVariant.specifications?.[variantAttributes[1]?.name]}` : 'Select variant'}
-      </Typography>
-      
-      <Grid container spacing={2}>
-        {availableVariantsForColor.map((variant: ProductVariant) => {
-          const isSelected = selectedVariantId === variant._id;
-          
-          // Build variant label from all variant attributes
-          const variantLabels = variantAttributes
-            .map(attr => variant.specifications?.[attr.name])
-            .filter(Boolean);
-          const combinedLabel = variantLabels.join(' + ');
-          
-          // Calculate discount
-          const discount = variant.mrpPrice && variant.sellingPrice
-            ? Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)
-            : 0;
-          
-          // ✅ Check if this variant is available in other colors
-          const isInOtherColors = product.variants?.some(v => 
-            v.color?.toLowerCase() !== selectedColor.toLowerCase() &&
-            variantAttributes.every(attr => v.specifications?.[attr.name] === variant.specifications?.[attr.name])
-          );
-          
-          return (
-            <Grid key={variant._id} size={{ xs: 12, sm: 6, md: 4 }}>
-              <Card
-                onClick={() => {
-                  if (variant.stock > 0 || isInOtherColors) {
-                    handleVariantSelect(variant);
-                  }
-                }}
-                sx={{
-                  cursor: variant.stock > 0 ? 'pointer' : isInOtherColors ? 'pointer' : 'not-allowed',
-                  border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
-                  '&:hover': variant.stock > 0 ? { borderColor: '#ff9f00', boxShadow: 2 } : {},
-                  transition: 'all 0.2s',
-                  opacity: variant.stock === 0 && !isInOtherColors ? 0.6 : 1,
-                  borderRadius: 2,
-                  position: 'relative',
-                  bgcolor: isSelected ? '#fff8e1' : 'white'
-                }}
-              >
-                <CardContent sx={{ p: 2 }}>
-                  {/* Variant Label */}
-                  <Typography variant="body1" fontWeight={isSelected ? 'bold' : 'normal'} sx={{ mb: 1 }}>
-                    {combinedLabel}
-                  </Typography>
-                  
-                  {/* Discount & Price */}
-                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', mb: 1 }}>
-                    {discount > 0 && (
-                      <Typography variant="body2" color="success.main" fontWeight="bold">
-                        ↓{discount}%
-                      </Typography>
-                    )}
-                    {variant.mrpPrice && (
-                      <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
-                        ₹{variant.mrpPrice.toLocaleString()}
-                      </Typography>
-                    )}
-                    <Typography variant="h6" fontWeight="bold" color="text.primary">
-                      ₹{variant.sellingPrice?.toLocaleString()}
-                    </Typography>
-                  </Box>
-                  
-                  {/* Stock Status */}
-                  {variant.stock === 0 ? (
-                    isInOtherColors ? (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        Available in other colours
-                      </Typography>
-                    ) : (
-                      <Typography variant="caption" color="error" sx={{ display: 'block' }}>
-                        Out of Stock
-                      </Typography>
-                    )
-                  ) : variant.stock && variant.stock <= 5 ? (
-                    <Typography variant="caption" color="error" sx={{ display: 'block', fontWeight: 'bold' }}>
-                      {variant.stock} left
-                    </Typography>
-                  ) : null}
-                  
-                  {/* Selected Indicator */}
-                  {isSelected && (
-                    <CheckCircle 
-                      sx={{ 
-                        color: '#ff9f00', 
-                        fontSize: 20, 
-                        position: 'absolute', 
-                        top: 8, 
-                        right: 8 
-                      }} 
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
-      </Grid>
-    </Box>
-  );
-};
+        return (
+            <Box sx={{ mb: 4 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <MemoryIcon fontSize="small" color="primary" />
+                    Variant: {currentVariant ? `${currentVariant.specifications?.[variantAttributes[0]?.name]} + ${currentVariant.specifications?.[variantAttributes[1]?.name]}` : 'Select variant'}
+                </Typography>
+
+                <Grid container spacing={2}>
+                    {availableVariantsForColor.map((variant: ProductVariant) => {
+                        const isSelected = selectedVariantId === variant._id;
+
+                        // Build variant label from all variant attributes
+                        const variantLabels = variantAttributes
+                            .map(attr => variant.specifications?.[attr.name])
+                            .filter(Boolean);
+                        const combinedLabel = variantLabels.join(' + ');
+
+                        // Calculate discount
+                        const discount = variant.mrpPrice && variant.sellingPrice
+                            ? Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)
+                            : 0;
+
+                        // ✅ Check if this variant is available in other colors
+                        const isInOtherColors = product.variants?.some((v: any) =>
+                            v.color?.toLowerCase() !== selectedColor.toLowerCase() &&
+                            variantAttributes.every(attr => v.specifications?.[attr.name] === variant.specifications?.[attr.name])
+                        );
+
+                        return (
+                            <Grid key={variant._id} size={{ xs: 12, sm: 6, md: 4 }}>
+                                <Card
+                                    onClick={() => {
+                                        if (variant.stock > 0 || isInOtherColors) {
+                                            handleVariantSelect(variant);
+                                        }
+                                    }}
+                                    sx={{
+                                        cursor: variant.stock > 0 ? 'pointer' : isInOtherColors ? 'pointer' : 'not-allowed',
+                                        border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
+                                        '&:hover': variant.stock > 0 ? { borderColor: '#ff9f00', boxShadow: 2 } : {},
+                                        transition: 'all 0.2s',
+                                        opacity: variant.stock === 0 && !isInOtherColors ? 0.6 : 1,
+                                        borderRadius: 2,
+                                        position: 'relative',
+                                        bgcolor: isSelected ? '#fff8e1' : 'white'
+                                    }}
+                                >
+                                    <CardContent sx={{ p: 2 }}>
+                                        {/* Variant Label */}
+                                        <Typography variant="body1" fontWeight={isSelected ? 'bold' : 'normal'} sx={{ mb: 1 }}>
+                                            {combinedLabel}
+                                        </Typography>
+
+                                        {/* Discount & Price */}
+                                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                                            {discount > 0 && (
+                                                <Typography variant="body2" color="success.main" fontWeight="bold">
+                                                    ↓{discount}%
+                                                </Typography>
+                                            )}
+                                            {variant.mrpPrice && (
+                                                <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
+                                                    ₹{variant.mrpPrice.toLocaleString()}
+                                                </Typography>
+                                            )}
+                                            <Typography variant="h6" fontWeight="bold" color="text.primary">
+                                                ₹{variant.sellingPrice?.toLocaleString()}
+                                            </Typography>
+                                        </Box>
+
+                                        {/* Stock Status */}
+                                        {variant.stock === 0 ? (
+                                            isInOtherColors ? (
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                                    Available in other colours
+                                                </Typography>
+                                            ) : (
+                                                <Typography variant="caption" color="error" sx={{ display: 'block' }}>
+                                                    Out of Stock
+                                                </Typography>
+                                            )
+                                        ) : variant.stock && variant.stock <= 5 ? (
+                                            <Typography variant="caption" color="error" sx={{ display: 'block', fontWeight: 'bold' }}>
+                                                {variant.stock} left
+                                            </Typography>
+                                        ) : null}
+
+                                        {/* Selected Indicator */}
+                                        {isSelected && (
+                                            <CheckCircle
+                                                sx={{
+                                                    color: '#ff9f00',
+                                                    fontSize: 20,
+                                                    position: 'absolute',
+                                                    top: 8,
+                                                    right: 8
+                                                }}
+                                            />
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+                        );
+                    })}
+                </Grid>
+            </Box>
+        );
+    };
 
     // ✅ Render Product Highlights
     const renderProductHighlights = () => {
@@ -459,7 +623,7 @@ const renderVariantAttributeSelectors = () => {
 
     return (
         <div className='px-5 lg:px-20 pt-10'>
-            {products.loading ? (
+            {products.loading || catalogLoading ? (
                 <Box sx={{ textAlign: 'center', py: 10 }}><CircularProgress /></Box>
             ) : !product ? (
                 <Alert severity="error">Product not found</Alert>
@@ -514,6 +678,16 @@ const renderVariantAttributeSelectors = () => {
 
                     {/* Product Info */}
                     <section>
+                        {/* ✅ NEW: Show catalog badge if multi-seller product */}
+                        {isCatalogProduct && (
+                            <Chip
+                                label={`🏪 ${allSellerOffers.length} Sellers`}
+                                color="warning"
+                                size="small"
+                                sx={{ mb: 1 }}
+                            />
+                        )}
+
                         <Typography variant="h6" fontWeight="bold" color="teal.900">
                             {(product.seller as any)?.businessDetails?.businessName || product.seller?.sellerName || 'Seller'}
                         </Typography>
@@ -653,6 +827,9 @@ const renderVariantAttributeSelectors = () => {
                         </div>
 
                         {renderProductHighlights()}
+
+                        {/* ✅ NEW: Render Seller Offers Section (Multi-Seller Catalog) */}
+                        {renderSellerOffers()}
 
                         <div className="ratings w-full mt-10">
                             <Typography variant="h6" fontWeight="bold" className="pb-4">Review & Ratings</Typography>

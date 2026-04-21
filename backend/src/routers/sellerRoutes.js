@@ -18,7 +18,6 @@ router.post('/verify/login-otp', sellerController.verifyLoginOtp);
 
 router.post('/send-login-otp', sellerController.sendLoginOtp); 
 
-
 router.delete('/:id', sellerController.deleteSeller);
 
 router.post('/verify/otp', sellerController.verifyEmail);

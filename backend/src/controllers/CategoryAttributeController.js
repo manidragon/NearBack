@@ -1,4 +1,6 @@
 // D:\Mani\Code with Zosh\Backup\source code\backend\src\controllers\CategoryAttributeController.js
+const mongoose = require('mongoose');  // ✅ ADD THIS LINE
+const CategoryAttribute = require('../models/CategoryAttribute');
 const CategoryAttributeService = require('../services/CategoryAttributeService');
 const CategoryAttributeError = require('../exceptions/CategoryAttributeError');
 
@@ -6,44 +8,79 @@ class CategoryAttributeController {
   /**
    * ✅ GET /api/admin/categories/:categoryId/attributes
    */
-  getAttributesByCategory = async (req, res) => {
-    try {
-      const { categoryId } = req.params;
-      const { includeInactive } = req.query;
+ getAttributesByCategory = async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { includeInactive } = req.query;
 
-      if (!categoryId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Category ID is required'
-        });
-      }
+    console.log('📥 [Backend] Fetching attributes for:', categoryId, { includeInactive });
 
-      const attributes = await CategoryAttributeService.getAttributesByCategory(
-        categoryId,
-        includeInactive === 'true'
-      );
-
-      res.status(200).json({
-        success: true,
-        count: attributes.length,
-        data: attributes
-      });
-    } catch (error) {
-      console.error('❌ Get attributes error:', error.message);
-
-      if (error instanceof CategoryAttributeError) {
-        return res.status(404).json({
-          success: false,
-          message: error.message
-        });
-      }
-
-      res.status(500).json({
+    if (!categoryId) {
+      return res.status(400).json({
         success: false,
-        message: 'Server error while fetching attributes'
+        message: 'Category ID is required'
       });
     }
+
+    // ✅ Try to find category by EITHER _id (ObjectId) OR categoryId (slug)
+    const Category = mongoose.model('Category');
+    let categoryDoc;
+    
+    if (mongoose.Types.ObjectId.isValid(categoryId)) {
+      categoryDoc = await Category.findById(categoryId);
+    }
+    
+    if (!categoryDoc) {
+      categoryDoc = await Category.findOne({ 
+        categoryId: categoryId.toLowerCase(),
+        level: 3
+      });
+    }
+    
+    if (!categoryDoc) {
+      return res.status(404).json({
+        success: false,
+        message: `Category "${categoryId}" not found or is not a Level 3 category`
+      });
+    }
+    
+    if (categoryDoc.level !== 3) {
+      return res.status(400).json({
+        success: false,
+        message: `Category "${categoryId}" is not a Level 3 category (found level ${categoryDoc.level})`
+      });
+    }
+
+    const attributes = await CategoryAttributeService.getAttributesByCategory(
+      categoryDoc.categoryId,
+      includeInactive === 'true'
+    );
+
+    console.log('✅ [Backend] Found attributes:', attributes.length);
+
+    // ✅✅✅ CRITICAL FIX: Return array in "data" field (not "attributes")
+    // This matches your frontend interface: { success, count, data: CategoryAttribute[] }
+    res.status(200).json({
+      success: true,
+      count: attributes.length,
+      data: attributes  // ✅ Return as "data" to match frontend expectation
+    });
+  } catch (error) {
+    console.error('❌ [Backend] Get attributes error:', error.message, error.stack);
+
+    if (error instanceof CategoryAttributeError) {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching attributes: ' + error.message
+    });
   }
+}
 
   /**
    * ✅ GET /api/admin/categories/attributes/bulk
@@ -123,7 +160,7 @@ class CategoryAttributeController {
           isVariantField: isVariantField ?? false,
           displayInHighlights: displayInHighlights ?? true,
           sortOrder: sortOrder ?? 0,
-          isFilterable: isFilterable ?? true, 
+          isFilterable: isFilterable ?? true,
         },
         adminId
       );

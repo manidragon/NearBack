@@ -39,7 +39,9 @@ const addressRoutes = require('./routers/addressRoutes');
 const categoryRouters = require("./routers/categoryRoutes");
 const electronicCategoryRoutes = require('./routers/electronicCategoryRoutes');
 const categoryAttributeRoutes = require('./routers/categoryAttributeRoutes');
+const catalogRoutes = require('./routers/catalogRoutes');
 
+app.use('/api/catalog', catalogRoutes);
 app.use('/api/admin/categories', categoryAttributeRoutes);
 app.use('/api/admin/electronics', electronicCategoryRoutes);
 app.use('/api/categories', categoryRouters);
@@ -75,3 +77,5 @@ app.listen(port, async() => {
     await connectDB()
   console.log(`Server is running on port ${port}`);
 });
+
+
