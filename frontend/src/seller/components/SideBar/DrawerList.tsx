@@ -18,7 +18,7 @@ const menu = [
     activeIcon: <DashboardIcon className="text-white" />,
   },
   {
-    name: "Orders",
+    name: "Orders", 
     path: "/seller/orders",
     icon: <ShoppingBagIcon className="text-primary-color" />,
     activeIcon: <ShoppingBagIcon className="text-white" />,

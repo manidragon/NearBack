@@ -25,7 +25,7 @@ const variantSchema = new mongoose.Schema({
   sellingPrice: {
     type: Number,
     required: [true, 'Selling Price is required'],
-    min: 0
+    min: 0 
   },
 
   stock: {
@@ -66,7 +66,7 @@ const productSchema = new mongoose.Schema({
     index: true
   },
 
-  description: {
+  description: { 
     type: String,
     required: true,
     maxlength: 5000

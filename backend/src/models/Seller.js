@@ -18,7 +18,7 @@ const sellerSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true
-    },
+    }, 
     password: {
         type: String,
         required: true,
@@ -41,8 +41,8 @@ const sellerSchema = new mongoose.Schema({
             type: String,
             
         },
-        logo: {
-            type: String
+        logo: {  
+            type: String   
         },
         banner: {
             type: String
