@@ -474,7 +474,8 @@ if (Object.keys(topLevelUpdates).length > 0) {
 
       const product = await Product.findById(productId)
         .populate('seller', 'sellerName businessDetails.businessName')
-        .populate('category', 'name categoryId level');
+        .populate('category', 'name categoryId level')
+         .populate('variants.offers.seller', 'sellerName businessDetails.businessName'); 
 
       if (!product || !product.isActive) {
         throw new ProductError("Product not found");

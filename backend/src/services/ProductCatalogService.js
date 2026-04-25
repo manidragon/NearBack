@@ -170,14 +170,17 @@ class ProductCatalogService {
             color: variantObj.color,
             specifications: variantObj.specifications,
             images: variantObj.images,
-            offers: variantObj.offers?.map(o => {
-              const offerObj = o.toObject?.() || o;
-              return {
-                ...offerObj,
-                _id: offerObj._id?.toString?.(),
-                seller: offerObj.seller?.toString?.() || offerObj.seller
-              };
-            }),
+           offers: variantObj.offers?.map(o => {
+  const offerObj = o.toObject?.() || o;
+  return {
+    ...offerObj,
+    _id: offerObj._id?.toString?.(),
+    // ✅ Keep seller as populated object if available
+    seller: offerObj.seller && typeof offerObj.seller === 'object' 
+      ? offerObj.seller  // Already populated with businessDetails
+      : offerObj.seller?.toString?.() || offerObj.seller  // Fallback to ID string
+  };
+}),
             // ✅✅✅ CRITICAL: Stringify variantOwner for frontend
             variantOwner: variantObj.variantOwner?.toString?.(),
             isActive: variantObj.isActive

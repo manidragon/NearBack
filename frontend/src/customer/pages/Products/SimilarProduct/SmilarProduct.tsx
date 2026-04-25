@@ -15,11 +15,14 @@ const SmilarProduct = () => {
   const dispatch = useAppDispatch();
   const { categoryId } = useParams();
 
-  useEffect(() => {
-    if (categoryId) {
+useEffect(() => {
+  if (categoryId) {
+    // ✅ Only fetch if NOT loading and NOT already loaded
+    if (!products.loading && (!products.products || products.products.length === 0)) {
       dispatch(getAllProducts({ category: categoryId }));
     }
-  }, [categoryId, dispatch]);
+  }
+}, [categoryId, dispatch, products.loading, products.products]);
 
   // ✅ Safe products array getter
   const productsToRender = products.products || [];

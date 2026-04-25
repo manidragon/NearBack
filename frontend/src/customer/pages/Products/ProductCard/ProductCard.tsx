@@ -60,10 +60,23 @@ const ProductCard: React.FC<ProductCardProps> = ({ item, categoryId }) => {
     return [];
   }, [item.images, item.variants]);
 
-  const handleAddWishlist = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (item._id) dispatch(addProductToWishlist({ productId: item._id }));
-  };
+ const handleAddWishlist = (event: React.MouseEvent<HTMLButtonElement>) => {
+  event.stopPropagation();
+  
+  // ✅ Validate product ID
+  if (!item._id) {
+    console.error('❌ Cannot add to wishlist: Product ID is missing');
+    return;
+  }
+  
+  console.log('🔍 [Wishlist] Adding product:', {
+    productId: item._id,
+    productTitle: item.title
+  });
+  
+  // ✅ Dispatch action
+  dispatch(addProductToWishlist({ productId: item._id }));
+};
 
   // ✅✅✅ FIXED: Safe useEffect with productImages dependency
   useEffect(() => {
@@ -160,20 +173,25 @@ const ProductCard: React.FC<ProductCardProps> = ({ item, categoryId }) => {
               <div className="flex gap-3">
                 {/* Wishlist button - safe check for wishlist array */}
                 {wishlist.wishlist && Array.isArray(wishlist.wishlist) && (
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    sx={{ zIndex: 10 }}
-                    className="z-50"
-                    onClick={handleAddWishlist}
-                    aria-label={isWishlisted(wishlist.wishlist, item) ? "Remove from wishlist" : "Add to wishlist"}
-                  >
-                    {isWishlisted(wishlist.wishlist, item) ? (
-                      <FavoriteIcon sx={{ color: teal[500] }} />
-                    ) : (
-                      <FavoriteBorderIcon sx={{ color: "gray" }} />
-                    )}
-                  </Button>
+                 <Button
+  variant="contained"
+  color="secondary"
+  sx={{ zIndex: 10 }}
+  className="z-50"
+  onClick={handleAddWishlist}
+  disabled={!item._id}  // ✅ Disable if no product ID
+  aria-label={
+    wishlist.wishlist && Array.isArray(wishlist.wishlist) && isWishlisted(wishlist.wishlist, item)
+      ? "Remove from wishlist"
+      : "Add to wishlist"
+  }
+>
+  {wishlist.wishlist && Array.isArray(wishlist.wishlist) && isWishlisted(wishlist.wishlist, item) ? (
+    <FavoriteIcon sx={{ color: teal[500] }} />
+  ) : (
+    <FavoriteBorderIcon sx={{ color: "gray" }} />
+  )}
+</Button>
                 )}
 
                 {/* ChatBot button */}

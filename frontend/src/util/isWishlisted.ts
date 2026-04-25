@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\util\isWishlisted.ts
 import type{ Product } from "../types/productTypes";
 import type{ Wishlist } from "../types/wishlistTypes";
 

@@ -9,13 +9,13 @@ import {
 import ShieldIcon from '@mui/icons-material/Shield';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
-import { Wallet, CheckCircle } from '@mui/icons-material';
+import { Wallet, CheckCircle, Store } from '@mui/icons-material';
 import RemoveIcon from '@mui/icons-material/Remove';
 import AddIcon from '@mui/icons-material/Add';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import PaletteIcon from '@mui/icons-material/Palette';
 import MemoryIcon from '@mui/icons-material/Memory';
-import StoreIcon from '@mui/icons-material/Store'; // ✅ NEW: For seller offers
+import StoreIcon from '@mui/icons-material/Store';
 import SmilarProduct from '../SimilarProduct/SmilarProduct';
 import ZoomableImage from './ZoomableImage';
 import { useAppDispatch, useAppSelector } from '../../../../Redux Toolkit/Store';
@@ -34,6 +34,7 @@ import {
     selectCategoryAttributes,
     selectCategoryAttributesLoading
 } from '../../../../Redux Toolkit/Admin/CategoryAttributeSlice';
+import { api } from '../../../../Config/Api'; // ✅ ADD THIS IMPORT
 
 const style = {
     position: 'absolute',
@@ -76,108 +77,173 @@ const ProductDetails = () => {
     // ============================================
     // ✅ NEW STATE for Seller Selection (Multi-Seller Catalog)
     // ============================================
+    const [sellerOffers, setSellerOffers] = useState<any[]>([]);
     const [selectedSellerOffer, setSelectedSellerOffer] = useState<any>(null);
-    const [allSellerOffers, setAllSellerOffers] = useState<any[]>([]);
-    const [selectedSellerId, setSelectedSellerId] = useState<string>('');
     const [isCatalogProduct, setIsCatalogProduct] = useState(false);
     const [catalogLoading, setCatalogLoading] = useState(false);
 
     // ✅ NEW: Get product reference (moved BEFORE useEffects that use it)
     const product = products.product;
 
+    const checkIsInOtherColors = (currentVariant: ProductVariant, currentColor: string): boolean => {
+        if (!product?.variants) return false;
+        return product.variants.some((v: any) =>
+            v.color?.toLowerCase() !== currentColor.toLowerCase() &&
+            variantAttributes.every(attr =>
+                v.specifications?.[attr.name] === currentVariant.specifications?.[attr.name]
+            ) &&
+            v.isActive !== false &&
+            (v.offers?.some((o: any) => o.isActive !== false && (o.stock ?? 0) > 0) || (v.stock ?? 0) > 0)
+        );
+    };
+
     // ============================================
-    // ✅ NEW: Fetch All Seller Offers for Catalog Products
+    // ✅ NEW: Fetch All Seller Offers for the Selected Variant
     // ============================================
+    // ✅ UPDATED: Fetch seller offers for BOTH catalog and independent products
     useEffect(() => {
-        const fetchCatalogOffers = async () => {
-            // Check if product is linked to a catalog
-            if (product?.catalog?._id) {
-                setIsCatalogProduct(true);
-                setCatalogLoading(true);
+        console.log('🔍 [Seller Offers Check]', {
+            selectedVariantId,
+            productId: product?._id,
+            hasCatalog: !!product?.catalog?._id,
+            totalVariants: product?.variants?.length,
+            selectedVariant: product?.variants?.find(v => v._id === selectedVariantId)
+        });
 
-                try {
-                    const response = await fetch(`/api/catalog/${product.catalog._id}`, {
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    const data = await response.json();
-
-                    if (data.success && data.data.offers?.length > 0) {
-                        setAllSellerOffers(data.data.offers);
-
-                        // Default to lowest price seller
-                        const lowestOffer = data.data.offers.reduce((min: any, offer: any) =>
-                            offer.minPrice < min.minPrice ? offer : min
-                        );
-                        setSelectedSellerOffer(lowestOffer);
-
-                        console.log('✅ Catalog offers loaded:', data.data.offers.length);
-                    }
-                } catch (error) {
-                    console.error('❌ Failed to fetch catalog offers:', error);
-                } finally {
-                    setCatalogLoading(false);
-                }
-            } else {
-                setIsCatalogProduct(false);
-                setAllSellerOffers([]);
+        const fetchSellerOffers = async () => {
+            // Only fetch if we have a selected variant AND product
+            if (!selectedVariantId || !product?._id) {
+                setSellerOffers([]);
                 setSelectedSellerOffer(null);
+                setIsCatalogProduct(false);
+                return;
+            }
+
+            // ✅ Safe check: is this a catalog-linked product?
+            const isCatalog = !!(product?.catalog && product.catalog._id);
+            setIsCatalogProduct(isCatalog);
+
+            try {
+                if (isCatalog && product.catalog?._id) {
+                    // Fetch from catalog endpoint
+                    const response = await api.get(`/api/catalog/${product.catalog._id}/offers`);
+
+                    if (response.data.success && response.data.data.offers?.length > 0) {
+                        const offersWithVariant = response.data.data.offers.filter((offer: any) =>
+                            offer.variants?.some((v: any) => v._id === selectedVariantId && (v.stock ?? 0) > 0 && v.isActive !== false)
+                        );
+
+                        setSellerOffers(offersWithVariant);
+
+                        // ✅ Declare lowestOffer BEFORE using it in console.log
+                        let lowestOffer: any = null;
+                        if (offersWithVariant.length > 0) {
+                            lowestOffer = offersWithVariant.reduce((min: any, offer: any) => {
+                                const variant = offer.variants.find((v: any) => v._id === selectedVariantId);
+                                const minVariant = min.variants.find((v: any) => v._id === selectedVariantId);
+                                return (variant?.sellingPrice ?? Infinity) < (minVariant?.sellingPrice ?? Infinity) ? offer : min;
+                            });
+                            setSelectedSellerOffer(lowestOffer);
+                        }
+
+                        // ✅ Targeted debug log (now lowestOffer is defined)
+                        console.log('✅ [Seller Offers] Catalog offers loaded:', {
+                            count: offersWithVariant.length,
+                            selected: lowestOffer?.seller?.businessDetails?.businessName || lowestOffer?.seller?.sellerName
+                        });
+                    }
+                } else {
+                    // ✅ For independent products: extract offers directly from product.variants
+                    const variant = product?.variants?.find((v: any) => v._id === selectedVariantId);
+
+                    if (variant?.offers && variant.offers.length > 0) {
+                        const activeOffers = variant.offers.filter((o: any) =>
+                            o.isActive !== false && (o.stock ?? 0) > 0
+                        );
+
+                        const formattedOffers = activeOffers.map((offer: any) => {
+                            const sellerId = typeof offer.seller === 'string' ? offer.seller : offer.seller?._id;
+
+                            return {
+                                _id: offer._id,
+                                seller: {
+                                    _id: sellerId,
+                                    // ✅ Backend now populates these; if not, they'll be undefined (fallback to 'Seller')
+                                    businessDetails: offer.seller?.businessDetails,
+                                    sellerName: offer.seller?.sellerName
+                                },
+                                variants: [{
+                                    _id: selectedVariantId,
+                                    ...variant,
+                                    sellingPrice: offer.sellingPrice,
+                                    mrpPrice: offer.mrpPrice,
+                                    stock: offer.stock
+                                }],
+                                minPrice: offer.sellingPrice,
+                                maxPrice: offer.sellingPrice
+                            };
+                        });
+
+                        setSellerOffers(formattedOffers);
+
+                        let lowest: any = null;
+                        if (formattedOffers.length > 0) {
+                            lowest = formattedOffers.reduce((min: any, curr: any) =>
+                                (curr.variants[0]?.sellingPrice ?? Infinity) < (min.variants[0]?.sellingPrice ?? Infinity)
+                                    ? curr : min
+                            );
+                            setSelectedSellerOffer(lowest);
+                        }
+
+                        console.log('✅ [Seller Offers] Independent product offers loaded:', {
+                            count: formattedOffers.length,
+                            sellers: formattedOffers.map(o => o.seller.businessDetails?.businessName || o.seller.sellerName)
+                        });
+                    } else {
+                        console.log('⚠️ [Seller Offers] No offers found for variant:', selectedVariantId);
+                    }
+                }
+            } catch (error) {
+                console.error('❌ [Seller Offers] Failed to fetch:', error);
+                setSellerOffers([]);
             }
         };
 
-        fetchCatalogOffers();
-    }, [product?.catalog?._id]);
+        fetchSellerOffers();
+    }, [selectedVariantId, product?._id, product?.catalog?._id, product?.variants]);
 
-    // ✅ DEBUG: Log JWT and attribute state
     useEffect(() => {
-        const jwt = localStorage.getItem('jwt');
-        console.log('🔑 [DEBUG] JWT:', jwt ? '✅ Present' : '❌ Missing');
-        console.log('📋 [DEBUG] attributeState:', {
-            length: attributeState?.length || 0,
-            hasAttributes: (attributeState?.length || 0) > 0
-        });
-    }, [attributeState]);
+        let checkCategoriesInterval: ReturnType<typeof setTimeout> | undefined;
+        let isMounted = true;
 
-    // ✅ Fetch data on mount
-    useEffect(() => {
-        let checkCategoriesInterval: NodeJS.Timeout | undefined;
-        let isMounted = true; // ✅ Track component mount status
-
-        // ✅ Fetch product and reviews (only if productId exists)
+        // ✅ Fetch product ONLY if productId exists and not already loaded
         if (productId) {
-            dispatch(fetchProductById(productId));
+            const currentProduct = products.product;
+            if (!currentProduct || currentProduct._id !== productId) {
+                dispatch(fetchProductById(productId));
+            }
             dispatch(fetchReviewsByProductId({ productId }));
         }
 
-        // ✅ Fetch category attributes (only if categoryId exists)
-        if (categoryId) {
-            // Fetch similar products for the category
-            dispatch(getAllProducts({ category: categoryId }));
-
-            // Helper function to fetch attributes if slug is available
+        // ✅ Fetch category attributes ONLY if not already loaded
+        if (categoryId && attributeState.length === 0 && !attributesLoading) {
             const fetchAttributesIfSlugExists = (cats: Category[]) => {
                 const foundCategory = cats.find((cat: Category) => cat._id === categoryId);
 
                 if (foundCategory?.categoryId) {
                     const slug = foundCategory.categoryId;
-                    console.log('✅ Category slug found:', slug);
-
-                    // ✅ Guard: Only fetch if not already loading and not already loaded
-                    if (!attributeState.loading && attributeState.length === 0) {
-                        dispatch(fetchCategoryAttributes({
-                            categoryId: slug,
-                            includeInactive: false
-                        }));
-                    }
-                    return true; // ✅ Slug found and handled
+                    dispatch(fetchCategoryAttributes({
+                        categoryId: slug,
+                        includeInactive: false
+                    }));
+                    return true;
                 }
-                return false; // ✅ Slug not found yet
+                return false;
             };
 
-            // ✅ Try immediate fetch first
             const cats = categoryState?.categories || [];
             const handled = fetchAttributesIfSlugExists(cats);
 
-            // ✅ If slug not found, poll for categories to load
             if (!handled && isMounted) {
                 checkCategoriesInterval = setInterval(() => {
                     if (!isMounted) {
@@ -188,7 +254,6 @@ const ProductDetails = () => {
                     const updatedCats = categoryState?.categories || [];
                     const wasHandled = fetchAttributesIfSlugExists(updatedCats);
 
-                    // ✅ Stop polling once handled
                     if (wasHandled && checkCategoriesInterval) {
                         clearInterval(checkCategoriesInterval);
                         checkCategoriesInterval = undefined;
@@ -197,7 +262,6 @@ const ProductDetails = () => {
             }
         }
 
-        // ✅ Cleanup function - ALWAYS runs on unmount or dependency change
         return () => {
             isMounted = false;
             if (checkCategoriesInterval) {
@@ -205,134 +269,90 @@ const ProductDetails = () => {
                 checkCategoriesInterval = undefined;
             }
         };
-    }, [productId, categoryId, dispatch, categoryState?.categories, attributeState.loading, attributeState.length]);
+    }, [
+        productId,
+        categoryId,
+        dispatch,
+        products.product?._id,  // ✅ Add this to prevent re-fetch
+        attributeState.length,
+        attributesLoading,
+        categoryState?.categories
+    ]);
 
     // ✅ Auto-select first variant
     useEffect(() => {
         if (product?.variants && product.variants.length > 0 && !selectedColor) {
             const firstActiveVariant = product.variants.find(v => v.isActive !== false);
+
             if (firstActiveVariant) {
+                // Set the color
                 setSelectedColor(firstActiveVariant.color);
+
+                // Set the variant ID
                 setSelectedVariantId(firstActiveVariant._id || '');
+
+                // Set the specifications
                 if (firstActiveVariant.specifications) {
                     setSelectedSpecs(firstActiveVariant.specifications as Record<string, string>);
                 }
+
+                // Reset image to first
+                setSelectedImage(0);
             }
         }
-    }, [product?.variants]);
+    }, [product?.variants, selectedColor]);
 
-    // ============================================
-    // ✅ NEW: Render Seller Offers Section (Multi-Seller)
-    // ============================================
-    const renderSellerOffers = () => {
-        if (!isCatalogProduct || !selectedVariantId || availableSellersForVariant.length === 0) return null;
-
-        return (
-            <Paper sx={{ p: 3, mt: 3, bgcolor: 'warning.50', border: '1px solid', borderColor: 'warning.light' }}>
-                <Typography variant="h6" fontWeight="bold" gutterBottom>
-                    🏪 Select Seller for this Variant ({availableSellersForVariant.length})
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Select a seller to view their price and stock. All sellers offer the same product quality.
-                </Typography>
-
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {allSellerOffers.map((offer) => {
-                        const isSelected = selectedSellerOffer?._id === offer._id;
-                        const lowestPrice = Math.min(...offer.variants.map((v: any) => v.sellingPrice));
-
-                        return (
-                            <Box
-                                key={offer._id}
-                                onClick={() => setSelectedSellerOffer(offer)}
-                                sx={{
-                                    p: 2,
-                                    border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
-                                    borderRadius: 2,
-                                    cursor: 'pointer',
-                                    bgcolor: isSelected ? '#fff8e1' : 'white',
-                                    '&:hover': { borderColor: '#ff9f00', boxShadow: 1 }
-                                }}
-                            >
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <Box>
-                                        <Typography variant="subtitle1" fontWeight="bold">
-                                            {offer.seller?.businessDetails?.businessName || offer.seller?.sellerName}
-                                        </Typography>
-                                        <Typography variant="body2" color="text.secondary">
-                                            ✓ {offer.variants.length} variants available
-                                        </Typography>
-                                    </Box>
-                                    <Box sx={{ textAlign: 'right' }}>
-                                        <Typography variant="h6" fontWeight="bold" color="primary">
-                                            ₹{lowestPrice.toLocaleString()}
-                                        </Typography>
-                                        {isSelected && (
-                                            <Chip label="Selected" size="small" color="success" sx={{ mt: 0.5 }} />
-                                        )}
-                                    </Box>
-                                </Box>
-                            </Box>
-                        );
-                    })}
-                </Box>
-            </Paper>
-        );
-    };
-
-    // ✅ Separate attributes by type
+    // ✅ UPDATED: Separate attributes by type - more flexible filtering
     const { variantAttributes, highlightAttributes } = useMemo(() => {
         if (!attributeState || attributeState.length === 0) {
-            console.log('⚠️ No attributes loaded');
             return { variantAttributes: [], highlightAttributes: [] };
         }
 
         const variantAttrs: CategoryAttribute[] = attributeState.filter(
             (attr: CategoryAttribute) =>
-                attr.isVariantField === true &&
+                (attr.isVariantField === true || attr.name.toLowerCase() === 'ram' || attr.name.toLowerCase() === 'storage') &&
                 attr.isActive === true
         );
 
+        // ✅ UPDATED: Show highlights if displayInHighlights OR if it's a known highlight field
         const highlightAttrs: CategoryAttribute[] = attributeState.filter(
             (attr: CategoryAttribute) =>
-                attr.displayInHighlights === true &&
+                (attr.displayInHighlights === true ||
+                    ['brand', 'networktype', 'esimsupport', 'processorbrand', 'processorseries'].includes(attr.name.toLowerCase())) &&
                 attr.isVariantField !== true &&
                 attr.isActive === true
         );
 
-        variantAttrs.sort((a: CategoryAttribute, b: CategoryAttribute) =>
-            (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
-        );
-
-        highlightAttrs.sort((a: CategoryAttribute, b: CategoryAttribute) =>
-            (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
-        );
-
-        console.log('✅ Attributes separated:', {
-            variantCount: variantAttrs.length,
-            highlightCount: highlightAttrs.length,
-            variantNames: variantAttrs.map(a => a.name),
-            highlightNames: highlightAttrs.map(a => a.name)
-        });
+        variantAttrs.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+        highlightAttrs.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
         return { variantAttributes: variantAttrs, highlightAttributes: highlightAttrs };
     }, [attributeState]);
 
-    // ✅ UPDATED: Use selected seller's variants for catalog products
+    // ✅ UPDATED: Get current variant with offer data merged
     const currentVariant = useMemo(() => {
-        if (isCatalogProduct && selectedSellerOffer) {
-            // For catalog products, use selected seller's variants
-            if (!selectedVariantId) return null;
-            return selectedSellerOffer.variants?.find((v: any) =>
+        if (isCatalogProduct && selectedSellerOffer && selectedVariantId) {
+            // For catalog products, use selected seller's variant
+            const variant = selectedSellerOffer.variants?.find((v: any) =>
                 v._id === selectedVariantId && v.isActive !== false
-            ) || null;
+            );
+            if (!variant) return null;
+
+            // Merge offer data into variant for display
+            const activeOffer = variant.offers?.find((o: any) => o.isActive !== false);
+            return activeOffer ? { ...variant, ...activeOffer } : variant;
         }
 
-        // For independent products, use product's variants (existing logic)
+        // For independent products, use product's variants
         if (!product?.variants || !selectedVariantId) return null;
-        return product.variants.find(v =>
+        const variant = product.variants.find(v =>
             v._id === selectedVariantId && v.isActive !== false
-        ) || null;
+        );
+        if (!variant) return null;
+
+        // ✅ Merge first active offer data into variant for display
+        const activeOffer = variant.offers?.find((o: any) => o.isActive !== false);
+        return activeOffer ? { ...variant, ...activeOffer } : variant;
     }, [isCatalogProduct, selectedSellerOffer, product?.variants, selectedVariantId]);
 
     const colorsWithImages = useMemo(() => {
@@ -340,56 +360,74 @@ const ProductDetails = () => {
         if (!sourceProduct?.variants || !sourceProduct.variants.length) return [];
 
         const colorMap = new Map<string, { color: string; images: string[]; variants: any[] }>();
+
         sourceProduct.variants
             .filter((v: any) => v.isActive !== false && v.color)
             .forEach((v: any) => {
                 if (!colorMap.has(v.color)) {
                     colorMap.set(v.color, {
                         color: v.color,
-                        images: (v.images || []).filter((img: string) => img && img.trim() !== ''),
+                        images: [],  // Start with empty array
                         variants: []
                     });
                 }
                 colorMap.get(v.color)!.variants.push(v);
+
+                // ✅ Collect ALL images from ALL variants of this color
+                if (v.images && Array.isArray(v.images)) {
+                    v.images.forEach((img: string) => {
+                        if (img && img.trim() !== '' && !colorMap.get(v.color)!.images.includes(img)) {
+                            colorMap.get(v.color)!.images.push(img);
+                        }
+                    });
+                }
             });
+
         return Array.from(colorMap.values());
     }, [isCatalogProduct, selectedSellerOffer, product?.variants]);
 
     const availableVariantsForColor = useMemo(() => {
         if (!selectedColor) return [];
-        // Get all variants from all sellers that match the color
-        const allVariants = isCatalogProduct
-            ? allSellerOffers.flatMap(offer => offer.variants || [])
+
+        // ✅ Get all variants from all sellers that match the color
+        const allVariants = isCatalogProduct && sellerOffers.length > 0
+            ? sellerOffers.flatMap(offer => offer.variants || [])
             : product?.variants || [];
 
+        // ✅ Filter by color and active status
         return allVariants.filter((v: any) =>
             v.color?.toLowerCase() === selectedColor.toLowerCase() && v.isActive !== false
         );
-    }, [selectedColor, isCatalogProduct, allSellerOffers, product?.variants]);
+    }, [selectedColor, isCatalogProduct, sellerOffers, product?.variants]);
 
     const availableSellersForVariant = useMemo(() => {
         if (!selectedVariantId || !isCatalogProduct) return [];
 
-        return allSellerOffers.filter((offer: any) =>
-            offer.variants?.some((v: any) => v._id === selectedVariantId && v.stock > 0)
+        return sellerOffers.filter((offer: any) =>
+            offer.variants?.some((v: any) => v._id === selectedVariantId && v.stock > 0 && v.isActive !== false)
         );
-    }, [selectedVariantId, isCatalogProduct, allSellerOffers]);
+    }, [selectedVariantId, isCatalogProduct, sellerOffers]);
 
     const displayImages = useMemo(() => {
         const sourceProduct = isCatalogProduct && selectedSellerOffer ? selectedSellerOffer : product;
         if (!sourceProduct) return [];
 
-        if (currentVariant?.images && currentVariant.images.length > 0) {
+        // ✅ If a specific variant is selected, show ONLY that variant's images
+        if (currentVariant?.images && currentVariant.images.length > 0 && selectedVariantId) {
             return currentVariant.images.filter((img: string) => img && img.trim() !== '');
         }
+
+        // ✅ If only color is selected (no specific variant), show ALL unique images for that color
         if (selectedColor && sourceProduct.variants) {
             const colorData = colorsWithImages.find(c => c.color === selectedColor);
             if (colorData?.images && colorData.images.length > 0) {
                 return colorData.images;
             }
         }
+
+        // Fallback to product-level images
         return (sourceProduct.images || []).filter((img: string) => img && img.trim() !== '');
-    }, [isCatalogProduct, selectedSellerOffer, product, currentVariant, selectedColor, colorsWithImages]);
+    }, [isCatalogProduct, selectedSellerOffer, product, currentVariant, selectedColor, selectedVariantId, colorsWithImages]);
 
     const handleColorSelect = useCallback((color: string, variantId?: string) => {
         setSelectedColor(color);
@@ -401,16 +439,25 @@ const ProductDetails = () => {
     }, []);
 
     const handleVariantSelect = useCallback((variant: ProductVariant) => {
+        console.log('🔍 [Variant Select] Selected:', {
+            variantId: variant._id,
+            color: variant.color,
+            specs: variant.specifications,
+            stock: variant.stock
+        });
+
         setSelectedVariantId(variant._id || '');
         if (variant.specifications) {
             setSelectedSpecs(variant.specifications as Record<string, string>);
         }
+
+        // ✅ Reset selected seller when variant changes
+        setSelectedSellerOffer(null);
     }, []);
 
     const handleSpecSelect = useCallback((attrName: string, value: string) => {
         setSelectedSpecs(prev => ({ ...prev, [attrName]: value }));
 
-        // ✅ Add type annotation: (v: ProductVariant)
         const matchingVariant = availableVariantsForColor.find((v: ProductVariant) =>
             Object.entries({ ...selectedSpecs, [attrName]: value }).every(
                 ([key, val]) => v.specifications?.[key] === val
@@ -447,15 +494,18 @@ const ProductDetails = () => {
             setSnackbarOpen(true);
             return;
         }
+
         const cartRequest = {
             productId: productId,
             quantity: quantity,
             variantId: currentVariant._id,
-            sellerId: isCatalogProduct ? selectedSellerId : undefined,
+            // ✅ Add sellerId for catalog products
+            sellerId: isCatalogProduct ? selectedSellerOffer?._id : undefined,
             ...(currentVariant._id && { variantId: currentVariant._id }),
             ...(selectedColor && { color: selectedColor }),
             ...(Object.keys(selectedSpecs).length > 0 && { specifications: selectedSpecs }),
         };
+
         dispatch(addItemToCart({ jwt, request: cartRequest })).then((result) => {
             if (addItemToCart.fulfilled.match(result)) {
                 dispatch(fetchUserCart(jwt));
@@ -468,7 +518,7 @@ const ProductDetails = () => {
                 setSnackbarOpen(true);
             }
         });
-    }, [productId, currentVariant, selectedColor, selectedSpecs, quantity, dispatch]);
+    }, [productId, currentVariant, selectedColor, selectedSpecs, quantity, isCatalogProduct, selectedSellerOffer, dispatch]);
 
     const handleSnackbarClose = () => setSnackbarOpen(false);
 
@@ -498,75 +548,46 @@ const ProductDetails = () => {
                             .filter(Boolean);
                         const combinedLabel = variantLabels.join(' + ');
 
-                        // Calculate discount
-                        const discount = variant.mrpPrice && variant.sellingPrice
-                            ? Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)
-                            : 0;
-
                         // ✅ Check if this variant is available in other colors
-                        const isInOtherColors = product.variants?.some((v: any) =>
-                            v.color?.toLowerCase() !== selectedColor.toLowerCase() &&
-                            variantAttributes.every(attr => v.specifications?.[attr.name] === variant.specifications?.[attr.name])
+                        const isInOtherColors = checkIsInOtherColors(variant, selectedColor);
+
+                        // ✅ Check if variant has any active offers with stock
+                        const hasActiveOffer = variant.offers?.some((o: any) =>
+                            o.isActive !== false && (o.stock ?? 0) > 0
                         );
 
                         return (
                             <Grid key={variant._id} size={{ xs: 12, sm: 6, md: 4 }}>
                                 <Card
                                     onClick={() => {
-                                        if (variant.stock > 0 || isInOtherColors) {
+                                        // ✅ Allow selection if has active offer OR available in other colors
+                                        if (hasActiveOffer || isInOtherColors) {
                                             handleVariantSelect(variant);
                                         }
                                     }}
                                     sx={{
-                                        cursor: variant.stock > 0 ? 'pointer' : isInOtherColors ? 'pointer' : 'not-allowed',
+                                        cursor: (hasActiveOffer || isInOtherColors) ? 'pointer' : 'not-allowed',
                                         border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
-                                        '&:hover': variant.stock > 0 ? { borderColor: '#ff9f00', boxShadow: 2 } : {},
+                                        '&:hover': hasActiveOffer ? { borderColor: '#ff9f00', boxShadow: 2 } : {},
                                         transition: 'all 0.2s',
-                                        opacity: variant.stock === 0 && !isInOtherColors ? 0.6 : 1,
+                                        opacity: (!hasActiveOffer && !isInOtherColors) ? 0.6 : 1,
                                         borderRadius: 2,
                                         position: 'relative',
                                         bgcolor: isSelected ? '#fff8e1' : 'white'
                                     }}
                                 >
                                     <CardContent sx={{ p: 2 }}>
-                                        {/* Variant Label */}
-                                        <Typography variant="body1" fontWeight={isSelected ? 'bold' : 'normal'} sx={{ mb: 1 }}>
+                                        {/* Variant Label ONLY */}
+                                        <Typography variant="body1" fontWeight={isSelected ? 'bold' : 'normal'}>
                                             {combinedLabel}
                                         </Typography>
 
-                                        {/* Discount & Price */}
-                                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', mb: 1 }}>
-                                            {discount > 0 && (
-                                                <Typography variant="body2" color="success.main" fontWeight="bold">
-                                                    ↓{discount}%
-                                                </Typography>
-                                            )}
-                                            {variant.mrpPrice && (
-                                                <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
-                                                    ₹{variant.mrpPrice.toLocaleString()}
-                                                </Typography>
-                                            )}
-                                            <Typography variant="h6" fontWeight="bold" color="text.primary">
-                                                ₹{variant.sellingPrice?.toLocaleString()}
+                                        {/* Availability Status ONLY */}
+                                        {!hasActiveOffer && (
+                                            <Typography variant="caption" color={isInOtherColors ? 'text.secondary' : 'error'} sx={{ display: 'block', mt: 1 }}>
+                                                {isInOtherColors ? 'Available in other colours' : 'Out of Stock'}
                                             </Typography>
-                                        </Box>
-
-                                        {/* Stock Status */}
-                                        {variant.stock === 0 ? (
-                                            isInOtherColors ? (
-                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                                                    Available in other colours
-                                                </Typography>
-                                            ) : (
-                                                <Typography variant="caption" color="error" sx={{ display: 'block' }}>
-                                                    Out of Stock
-                                                </Typography>
-                                            )
-                                        ) : variant.stock && variant.stock <= 5 ? (
-                                            <Typography variant="caption" color="error" sx={{ display: 'block', fontWeight: 'bold' }}>
-                                                {variant.stock} left
-                                            </Typography>
-                                        ) : null}
+                                        )}
 
                                         {/* Selected Indicator */}
                                         {isSelected && (
@@ -590,9 +611,19 @@ const ProductDetails = () => {
         );
     };
 
-    // ✅ Render Product Highlights
+    // ✅ UPDATED: Render Product Highlights - with null checks
     const renderProductHighlights = () => {
-        if (highlightAttributes.length === 0 || !currentVariant) return null;
+        // ✅ Guard: Return null if product or currentVariant is missing
+        if (!product || highlightAttributes.length === 0 || !currentVariant) return null;
+
+        // ✅ Safe access to product.highlights with fallback
+        const productHighlights = product.highlights || {};
+
+        // ✅ Get highlight values from product-level highlights OR variant specs
+        const highlightValues = {
+            ...productHighlights,  // Product-level highlights
+            ...currentVariant.specifications  // Fallback to variant specs
+        };
 
         return (
             <Paper sx={{ p: 3, mt: 3, bgcolor: 'success.50', border: '1px solid', borderColor: 'success.light' }}>
@@ -602,21 +633,113 @@ const ProductDetails = () => {
                 </Typography>
                 <Grid container spacing={2}>
                     {highlightAttributes.map((attr: CategoryAttribute) => {
-                        const value = currentVariant.specifications?.[attr.name];
+                        // ✅ Try multiple ways to get the value with null-safe access
+                        const value =
+                            highlightValues[attr.name] ||  // Direct match
+                            highlightValues[attr.name?.toLowerCase()] ||  // Lowercase match
+                            currentVariant.specifications?.[attr.name] ||  // Fallback to variant specs
+                            currentVariant.specifications?.[attr.name?.toLowerCase()];  // Lowercase fallback
+
                         if (!value) return null;
+
                         return (
                             <Grid key={attr.name} size={{ xs: 12, sm: 6 }}>
                                 <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
                                     <CheckCircle sx={{ color: 'success.main', fontSize: 18, mt: 0.2 }} />
                                     <Box>
                                         <Typography variant="body2" fontWeight="500">{attr.label}:</Typography>
-                                        <Typography variant="body2" color="text.secondary">{value}</Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}
+                                        </Typography>
                                     </Box>
                                 </Box>
                             </Grid>
                         );
                     })}
                 </Grid>
+            </Paper>
+        );
+    };
+
+    // ✅ Render Seller Offers Selection (Multi-Seller Catalog)
+    const renderSellerOffers = () => {
+        if (!isCatalogProduct || sellerOffers.length === 0 || !selectedVariantId) return null;
+
+        return (
+            <Paper sx={{ p: 3, mt: 3, bgcolor: 'warning.50', border: '1px solid', borderColor: 'warning.light' }}>
+                <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <StoreIcon color="warning" />
+                    🏪 Select Seller ({sellerOffers.length} offers)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Compare prices and choose the best offer from different sellers
+                </Typography>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {sellerOffers.map((offer) => {
+                        const variant = offer.variants.find((v: any) => v._id === selectedVariantId);
+                        if (!variant) return null;
+
+                        const isSelected = selectedSellerOffer?._id === offer._id;
+                        const sellerName =
+                            offer.seller?.businessDetails?.businessName ||  // Priority 1: Business name (populated)
+                            offer.seller?.sellerName ||                     // Priority 2: Seller name (populated)
+                            (typeof offer.seller === 'string' ? 'Loading...' : 'Seller');
+
+                        return (
+                            <Box
+                                key={offer._id}
+                                onClick={() => setSelectedSellerOffer(offer)}
+                                sx={{
+                                    p: 2,
+                                    border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
+                                    borderRadius: 2,
+                                    cursor: 'pointer',
+                                    bgcolor: isSelected ? '#fff8e1' : 'white',
+                                    '&:hover': { borderColor: '#ff9f00', boxShadow: 1 },
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+                                    {/* Seller Info */}
+                                    <Box sx={{ flex: 1, minWidth: 200 }}>
+                                        <Typography variant="subtitle1" fontWeight="bold">
+                                            {sellerName}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            ✓ {variant.stock > 0 ? `${variant.stock} in stock` : 'Out of stock'}
+                                        </Typography>
+                                    </Box>
+
+                                    {/* Price Info */}
+                                    <Box sx={{ textAlign: 'right' }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, justifyContent: 'flex-end' }}>
+                                            {variant.mrpPrice && variant.mrpPrice > variant.sellingPrice && (
+                                                <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
+                                                    ₹{variant.mrpPrice.toLocaleString()}
+                                                </Typography>
+                                            )}
+                                            <Typography variant="h6" fontWeight="bold" color="primary">
+                                                ₹{variant.sellingPrice.toLocaleString()}
+                                            </Typography>
+                                        </Box>
+                                        {variant.mrpPrice && variant.mrpPrice > variant.sellingPrice && (
+                                            <Chip
+                                                label={`${Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)}% off`}
+                                                size="small"
+                                                color="success"
+                                                sx={{ mt: 0.5 }}
+                                            />
+                                        )}
+                                        {isSelected && (
+                                            <Chip label="Selected" size="small" color="success" sx={{ mt: 1 }} />
+                                        )}
+                                    </Box>
+                                </Box>
+                            </Box>
+                        );
+                    })}
+                </Box>
             </Paper>
         );
     };
@@ -678,19 +801,7 @@ const ProductDetails = () => {
 
                     {/* Product Info */}
                     <section>
-                        {/* ✅ NEW: Show catalog badge if multi-seller product */}
-                        {isCatalogProduct && (
-                            <Chip
-                                label={`🏪 ${allSellerOffers.length} Sellers`}
-                                color="warning"
-                                size="small"
-                                sx={{ mb: 1 }}
-                            />
-                        )}
 
-                        <Typography variant="h6" fontWeight="bold" color="teal.900">
-                            {(product.seller as any)?.businessDetails?.businessName || product.seller?.sellerName || 'Seller'}
-                        </Typography>
                         <Typography variant="h4" fontWeight="bold" className='mt-1'>{product.title}</Typography>
 
                         <div className='flex justify-between items-center py-2 border w-[180px] px-3 mt-5'>
@@ -701,32 +812,6 @@ const ProductDetails = () => {
                             <Divider orientation="vertical" flexItem />
                             <span>{review.reviews?.length || 0} Ratings & Reviews</span>
                         </div>
-
-                        {currentVariant ? (
-                            <div className='space-y-2 mt-5'>
-                                <div className='price flex items-center gap-3 text-2xl'>
-                                    <span className='font-bold text-gray-800'>₹{currentVariant.sellingPrice?.toLocaleString()}</span>
-                                    {currentVariant.mrpPrice && currentVariant.mrpPrice > (currentVariant.sellingPrice || 0) && (
-                                        <>
-                                            <span className='text thin-line-through text-gray-400'>₹{currentVariant.mrpPrice.toLocaleString()}</span>
-                                            <span className='text-[#00927c] font-bold text-lg'>{calculateDiscount(currentVariant.mrpPrice, currentVariant.sellingPrice)}% off</span>
-                                        </>
-                                    )}
-                                </div>
-                                <p className='text-sm text-gray-600'>Inclusive of all taxes. Free Shipping above ₹1500.</p>
-                                {currentVariant.stock !== undefined && (
-                                    <Chip
-                                        label={currentVariant.stock > 0 ? `In Stock (${currentVariant.stock} available)` : 'Out of Stock'}
-                                        color={currentVariant.stock > 0 ? 'success' : 'error'}
-                                        sx={{ mt: 1 }}
-                                    />
-                                )}
-                            </div>
-                        ) : (
-                            <div className='space-y-2 mt-5'>
-                                <Typography color="text.secondary">Please select a variant to see price</Typography>
-                            </div>
-                        )}
 
                         {product.variants && product.variants.length > 0 && (
                             <Box sx={{ mt: 4 }}>
@@ -773,29 +858,130 @@ const ProductDetails = () => {
                                 {renderVariantAttributeSelectors()}
 
                                 {currentVariant && (
-                                    <Paper sx={{ p: 3, mb: 3, bgcolor: 'grey.50', border: '1px solid', borderColor: 'primary.light' }}>
+                                    <Paper sx={{ p: 3, mb: 3, bgcolor: '#fff8e1', border: '2px dashed', borderColor: 'orange.main' }}>
                                         <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                             <CheckCircle color="success" fontSize="small" />
-                                            Selected: {currentVariant.color} {currentVariant.specifications?.storage && `- ${currentVariant.specifications.storage}`} {currentVariant.specifications?.ram && `+ ${currentVariant.specifications.ram}`}
+                                            Selected: {currentVariant.color} - {currentVariant.specifications?.storage} + {currentVariant.specifications?.ram}
                                         </Typography>
 
-                                        <Box sx={{ p: 2, mb: 2, bgcolor: 'primary.50', borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>
-                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Price for selected variant:</Typography>
-                                            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
-                                                <Typography variant="h5" fontWeight="bold" color="primary.main">₹{currentVariant.sellingPrice?.toLocaleString()}</Typography>
-                                                {currentVariant.mrpPrice && currentVariant.mrpPrice > (currentVariant.sellingPrice || 0) && (
-                                                    <>
-                                                        <Typography variant="body1" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>₹{currentVariant.mrpPrice.toLocaleString()}</Typography>
-                                                        <Chip label={`${calculateDiscount(currentVariant.mrpPrice, currentVariant.sellingPrice)}% OFF`} size="small" color="success" sx={{ fontWeight: 'bold' }} />
-                                                    </>
-                                                )}
-                                            </Box>
-                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Inclusive of all taxes. Free Shipping above ₹1500.</Typography>
-                                        </Box>
+                                        {/* ✅ Display Seller Offers in Table Format */}
+                                        {sellerOffers.length > 0 ? (
+                                            <Box sx={{ mt: 2, mb: 2 }}>
+                                                <Typography variant="subtitle2" fontWeight="bold" gutterBottom color="text.secondary" sx={{ mb: 2 }}>
+                                                    🏪 Select Seller ({sellerOffers.length} offers available):
+                                                </Typography>
 
-                                        {currentVariant.stock !== undefined && (
-                                            <Chip label={currentVariant.stock > 0 ? `In Stock (${currentVariant.stock} available)` : 'Out of Stock'} color={currentVariant.stock > 0 ? 'success' : 'error'} sx={{ mb: 2 }} />
+                                                {/* Table Header */}
+                                                <Box sx={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: '2fr 1fr 1fr 100px',
+                                                    gap: 2,
+                                                    p: 2,
+                                                    bgcolor: 'grey.100',
+                                                    borderRadius: 1,
+                                                    fontWeight: 'bold',
+                                                    fontSize: '0.875rem'
+                                                }}>
+                                                    <Typography variant="body2">Seller</Typography>
+                                                    <Typography variant="body2">MRP</Typography>
+                                                    <Typography variant="body2">Selling Price</Typography>
+                                                    <Typography variant="body2">Action</Typography>
+                                                </Box>
+
+                                                {/* Table Rows */}
+                                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+                                                    {sellerOffers.map((offer) => {
+                                                        const variant = offer.variants.find((v: any) => v._id === selectedVariantId);
+                                                        if (!variant) return null;
+
+                                                        const isSelected = selectedSellerOffer?._id === offer._id;
+
+                                                        // ✅ Extract seller name with proper fallback chain
+                                                        const sellerName =
+                                                            offer.seller?.businessDetails?.businessName ||  // Priority 1: Business name
+                                                            offer.seller?.sellerName ||                     // Priority 2: Seller name
+                                                            'Seller';                                       // Fallback
+
+                                                        const discount = variant.mrpPrice && variant.mrpPrice > variant.sellingPrice
+                                                            ? Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)
+                                                            : 0;
+
+                                                        return (
+                                                            <Box
+                                                                key={offer._id}
+                                                                onClick={() => setSelectedSellerOffer(offer)}
+                                                                sx={{
+                                                                    display: 'grid',
+                                                                    gridTemplateColumns: '2fr 1fr 1fr 100px',
+                                                                    gap: 2,
+                                                                    p: 2,
+                                                                    border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
+                                                                    borderRadius: 1,
+                                                                    cursor: 'pointer',
+                                                                    bgcolor: isSelected ? '#fff3e0' : 'white',
+                                                                    '&:hover': { borderColor: '#ff9f00', boxShadow: 1 },
+                                                                    transition: 'all 0.2s',
+                                                                    alignItems: 'center'
+                                                                }}
+                                                            >
+                                                                {/* Seller Name */}
+                                                                <Box>
+                                                                    <Typography variant="body2" fontWeight="bold" color="text.primary">
+                                                                        {sellerName}
+                                                                    </Typography>
+                                                                    {discount > 0 && (
+                                                                        <Typography variant="caption" color="success.main" fontWeight="bold">
+                                                                            ↓{discount}% off
+                                                                        </Typography>
+                                                                    )}
+                                                                </Box>
+
+                                                                {/* MRP */}
+                                                                <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
+                                                                    ₹{variant.mrpPrice?.toLocaleString() || 'N/A'}
+                                                                </Typography>
+
+                                                                {/* Selling Price */}
+                                                                <Typography variant="body1" fontWeight="bold" color="primary">
+                                                                    ₹{variant.sellingPrice?.toLocaleString() || 'N/A'}
+                                                                </Typography>
+
+                                                                {/* Select Button */}
+                                                                <Button
+                                                                    size="small"
+                                                                    variant={isSelected ? 'contained' : 'outlined'}
+                                                                    color="primary"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedSellerOffer(offer);
+                                                                    }}
+                                                                    sx={{ fontSize: '0.75rem', py: 0.5 }}
+                                                                >
+                                                                    {isSelected ? '✓ Selected' : 'Select'}
+                                                                </Button>
+                                                            </Box>
+                                                        );
+                                                    })}
+                                                </Box>
+                                            </Box>
+                                        ) : (
+                                            /* Show regular price info when no seller offers */
+                                            <Box sx={{ p: 2, mb: 2, bgcolor: 'primary.50', borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Price for selected variant:</Typography>
+                                                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
+                                                    <Typography variant="h5" fontWeight="bold" color="primary.main">₹{currentVariant.sellingPrice?.toLocaleString()}</Typography>
+                                                    {currentVariant.mrpPrice && currentVariant.mrpPrice > (currentVariant.sellingPrice || 0) && (
+                                                        <>
+                                                            <Typography variant="body1" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>₹{currentVariant.mrpPrice.toLocaleString()}</Typography>
+                                                            <Chip label={`${calculateDiscount(currentVariant.mrpPrice, currentVariant.sellingPrice)}% OFF`} size="small" color="success" sx={{ fontWeight: 'bold' }} />
+                                                        </>
+                                                    )}
+                                                </Box>
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Inclusive of all taxes. Free Shipping above ₹1500.</Typography>
+                                            </Box>
                                         )}
+
+                                        {/* ✅ REMOVED: Stock chip that was here */}
 
                                         <Box sx={{ mt: 2, mb: 3 }}>
                                             <Typography fontWeight="bold" gutterBottom>Quantity:</Typography>
@@ -806,8 +992,21 @@ const ProductDetails = () => {
                                             </Box>
                                         </Box>
 
-                                        <Button variant="contained" fullWidth size="large" disabled={currentVariant.stock === 0} onClick={handleAddCart} startIcon={<AddShoppingCartIcon />} sx={{ py: 1.5, fontSize: '1.1rem' }}>
-                                            {currentVariant.stock === 0 ? 'Out of Stock' : 'Add to Cart'}
+                                        <Button
+                                            variant="contained"
+                                            fullWidth
+                                            size="large"
+                                            disabled={currentVariant.stock === 0 || (sellerOffers.length > 0 && !selectedSellerOffer)}
+                                            onClick={handleAddCart}
+                                            startIcon={<AddShoppingCartIcon />}
+                                            sx={{
+                                                py: 1.5,
+                                                fontSize: '1.1rem',
+                                                bgcolor: 'orange.600',
+                                                '&:hover': { bgcolor: 'orange.700' }
+                                            }}
+                                        >
+                                            {currentVariant.stock === 0 ? 'Out of Stock' : sellerOffers.length > 0 && !selectedSellerOffer ? 'Select a Seller' : 'Add to Cart'}
                                         </Button>
                                     </Paper>
                                 )}

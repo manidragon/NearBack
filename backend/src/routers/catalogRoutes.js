@@ -19,4 +19,6 @@ router.put('/offer/:offerId', sellerAuthMiddleware, catalogController.updateOffe
 // ✅ Get seller's offer for catalog
 router.get('/:catalogId/offer/me', sellerAuthMiddleware, catalogController.getSellerOfferForCatalog);
 
+router.get('/:catalogId/offers', catalogController.getAllOffersForCatalog);
+
 module.exports = router;
