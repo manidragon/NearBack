@@ -29,10 +29,7 @@ export const fetchCategoryAttributes = createAsyncThunk(
         params: { includeInactive }
       });
       
-      console.log('🔍 [Redux Slice] Raw API response:', response.data);
-      
       // ✅ FIX: Handle the response structure correctly
-      // API returns: { success: true, count: 23, data: [...] }
       if (response.data && Array.isArray(response.data.data)) {
         console.log('✅ [Redux Slice] Attributes fetched:', response.data.data.length);
         return response.data.data;  // ✅ Return the array inside 'data' field
@@ -362,7 +359,6 @@ const categoryAttributeSlice = createSlice({
       .addCase(
   fetchCategoryAttributes.fulfilled,
   (state, action: PayloadAction<CategoryAttribute[]>) => {
-    console.log('🔍 [Redux Slice] Attributes fetched:', action.payload.length);  // ✅ Debug log
     state.loading = false;
     state.attributes = action.payload;  // ✅ Store in state.attributes
     if (action.payload.length > 0) {
@@ -561,7 +557,6 @@ export const {
 
 export const selectCategoryAttributes = (state: RootState): CategoryAttribute[] => {
   const attrs = state.categoryAttribute?.attributes || [];
-  console.log('🔍 [Selector] Returning attributes:', attrs.length);  // ✅ Debug log
   return attrs;
 };
 

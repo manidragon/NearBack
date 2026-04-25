@@ -7,6 +7,7 @@ import { api } from "../../Config/Api";
 // Define the base URL for the API
 const API_URL = "/products";
 
+
 // Define the initial state type
 interface ProductState {
   product: Product | null;
@@ -59,6 +60,8 @@ export const searchProduct = createAsyncThunk<
     return rejectWithValue(error.response.data);
   }
 });
+
+
 export const getAllProducts = createAsyncThunk<
   any,
   {
@@ -73,8 +76,14 @@ export const getAllProducts = createAsyncThunk<
     stock?: string;
     pageNumber?: number;
   }
->("products/getAllProducts", async (params, { rejectWithValue }) => {
+>("products/getAllProducts", async (params, { rejectWithValue, getState }) => {
   try {
+    // ✅ Check if we already have products for this category
+    const state = getState() as any;
+    const existingProducts = state.products.products;
+    
+    // Optional: Add caching logic here if needed
+    
     const response = await api.get<any>(API_URL, {
       params: {
         ...params,
@@ -103,19 +112,12 @@ const productSlice = createSlice({
       .addCase(
         fetchProductById.fulfilled,
         (state, action: PayloadAction<any>) => {  // ✅ Change type to 'any' to handle wrapped response
-          console.log('🔍 fetchProductById.fulfilled payload:', action.payload);
 
           // ✅ Extract product from wrapped response { success: true, data: {...} }
           const productData = action.payload?.data || action.payload;
 
           state.product = productData;  // ✅ Assign the actual product object
           state.loading = false;
-
-          console.log('✅ Product loaded:', {
-            id: productData?._id,
-            title: productData?.title,
-            variantsCount: productData?.variants?.length
-          });
         }
       )
       .addCase(fetchProductById.rejected, (state, action) => {
@@ -156,7 +158,6 @@ const productSlice = createSlice({
       .addCase(
         getAllProducts.fulfilled,
         (state, action: PayloadAction<any>) => {
-          console.log('🔍 getAllProducts response:', action.payload);
 
           let productsArray: Product[] = [];
           let totalPages = 1;
@@ -181,12 +182,6 @@ const productSlice = createSlice({
           state.products = productsArray;
           state.totalPages = totalPages;
           state.loading = false;
-
-          console.log('✅ Processed products:', {
-            count: productsArray.length,
-            totalPages,
-            firstProduct: productsArray[0]?.title
-          });
         }
       )
       .addCase(getAllProducts.rejected, (state, action) => {

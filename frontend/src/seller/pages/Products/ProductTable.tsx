@@ -21,9 +21,7 @@ import {
   CircularProgress,
   Snackbar,
   Tabs,
-  Tab,
-  Switch,
-  FormControlLabel,
+  Tab
 } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
@@ -99,13 +97,12 @@ interface RowProps {
   onDelete: (productId: string) => void;
   getCategoryName: (categoryId: any) => string;
   isCatalogOffer?: boolean;
-  onStatusToggle: (productId: string, variantId: string, offerId: string, isActive: boolean) => void;  // <-- ADD THIS
 }
 
 // ============================================
 // ✅ Row Component - Enhanced for Catalog Offers
 // ============================================
-function Row({ row, onEdit, onDelete, getCategoryName, isCatalogOffer = false, onStatusToggle }: RowProps) {
+function Row({ row, onEdit, onDelete, getCategoryName, isCatalogOffer = false }: RowProps) {
   const [open, setOpen] = React.useState(false);
 
   // ✅ Debug: Log product structure on mount
@@ -371,20 +368,20 @@ function Row({ row, onEdit, onDelete, getCategoryName, isCatalogOffer = false, o
 
                           // ✅ Filter ONLY your active offers
                           const allOffers = variant.offers || [];
-const yourOffersList = allOffers.filter((offer: any) => {
-  const offerSellerId = offer.seller?._id || offer.seller;
-  return offerSellerId === currentSellerId;
-});
+                          const yourOffersList = allOffers.filter((offer: any) => {
+                            const offerSellerId = offer.seller?._id || offer.seller;
+                            return offerSellerId === currentSellerId;
+                          });
                           const yourOffer = yourOffersList[0]; // Get your first offer
 
                           // ✅ Debug log (remove after testing)
-                        console.log(`🔍 [Variant ${variantIdx}]`, {
-  variantId: variant._id,
-  totalOffers: allOffers.length,  // ✅ Updated to new variable name
-  yourOffersCount: yourOffersList.length,
-  currentSellerId,
-  yourOffer
-});
+                          console.log(`🔍 [Variant ${variantIdx}]`, {
+                            variantId: variant._id,
+                            totalOffers: allOffers.length,  // ✅ Updated to new variable name
+                            yourOffersCount: yourOffersList.length,
+                            currentSellerId,
+                            yourOffer
+                          });
 
                           return (
                             <Paper
@@ -432,24 +429,12 @@ const yourOffersList = allOffers.filter((offer: any) => {
                                       SKU: {yourOffer.sku || 'N/A'}
                                     </Typography>
 
-                                    <FormControlLabel
-                                      control={
-                                        <Switch
-                                          checked={yourOffer.isActive !== false}
-                                          onChange={async (e) => {
-                                            const newIsActive = e.target.checked;
-                                            // ✅ Call the parent's handler with proper null checks
-                                            if (row._id && variant._id && yourOffer._id) {
-                                              onStatusToggle(row._id, variant._id, yourOffer._id, newIsActive);
-                                            }
-                                          }}
-                                          color="success"
-                                          size="small"
-                                        />
-                                      }
+                                    <Chip
                                       label={yourOffer.isActive !== false ? "Active" : "Inactive"}
-                                      labelPlacement="start"
-                                      sx={{ ml: 0, minWidth: '90px' }}
+                                      size="small"
+                                      color={yourOffer.isActive !== false ? "success" : "default"}
+                                      variant="outlined"
+                                      sx={{ fontSize: '0.7rem' }}
                                     />
                                   </>
                                 ) : (
@@ -550,58 +535,6 @@ export default function ProductTable() {
     const category = categoryState.categories?.find((cat: Category) => cat._id === id);
     return category?.name || 'Unknown';
   };
-
-const handleToggleOfferStatus = async (
-  productId: string, 
-  variantId: string, 
-  offerId: string, 
-  newIsActive: boolean
-) => {
-  try {
-    // ✅ Find the current offer data from Redux state to include required fields
-    const product = sellerProduct.products.find(p => p._id === productId);
-    const variant = product?.variants?.find((v: any) => v._id === variantId);
-    const currentOffer = variant?.offers?.find((o: any) => o._id === offerId);
-    
-    if (!currentOffer) {
-      throw new Error('Offer not found');
-    }
-    
-    // ✅ Safely extract seller ID (handles both string and populated object)
-    const sellerId = typeof currentOffer.seller === 'string' 
-      ? currentOffer.seller 
-      : currentOffer.seller?._id || currentOffer.seller?.id;
-    
-    // ✅ Send minimal valid payload with all required fields
-    await dispatch(updateProduct({
-      productId,
-      product: {
-        variants: [{
-          _id: variantId,
-          color: variant?.color || '',  // ✅ Required by validator
-          images: variant?.images || [],  // ✅ Required by validator
-          offers: [{
-            _id: offerId,
-            seller: sellerId,  // ✅ Use extracted sellerId (always a string)
-            mrpPrice: currentOffer.mrpPrice || 0,  // ✅ Required
-            sellingPrice: currentOffer.sellingPrice || 0,  // ✅ Required
-            stock: currentOffer.stock || 0,  // ✅ Required (optional but safe)
-            isActive: newIsActive  // ✅ The field we're actually updating
-          }]
-        }]
-      }
-    } as any)).unwrap();
-    
-    setSnackbarMessage(`✅ Offer ${newIsActive ? 'activated' : 'deactivated'} successfully!`);
-    setSnackbarSeverity('success');
-    setSnackbarOpen(true);
-  } catch (error) {
-    console.error("❌ Failed to toggle offer status:", error);
-    setSnackbarMessage('❌ Failed to update status');
-    setSnackbarSeverity('error');
-    setSnackbarOpen(true);
-  }
-};
 
   // ✅ Separate products by type
   const getCurrentSellerId = () => {
@@ -798,7 +731,6 @@ const handleToggleOfferStatus = async (
                         onDelete={handleDeleteClick}
                         getCategoryName={getCategoryName}
                         isCatalogOffer={false}
-                        onStatusToggle={handleToggleOfferStatus}
                       />
                     ))}
                   </TableBody>
@@ -851,7 +783,6 @@ const handleToggleOfferStatus = async (
                         onDelete={handleDeleteClick}
                         getCategoryName={getCategoryName}
                         isCatalogOffer={true}
-                        onStatusToggle={handleToggleOfferStatus}
                       />
                     ))}
                   </TableBody>
