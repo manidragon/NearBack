@@ -17,83 +17,39 @@ import {
   transformApiAttribute,
   transformFormToApiPayload,
 } from '../../types/categoryAttributeTypes';
+import type { RootState } from '../Store';
 
 const API_BASE = '/api/admin/categories';
 
-// ✅✅✅ FIXED: fetchCategoryAttributes thunk
-export const fetchCategoryAttributes = createAsyncThunk<
-  CategoryAttribute[],
-  { categoryId: string; includeInactive?: boolean },
-  { rejectValue: string }
->(
-  'categoryAttribute/fetchByCategory',
-  async ({ categoryId, includeInactive = false }, { rejectWithValue }) => {
+export const fetchCategoryAttributes = createAsyncThunk(
+  'categoryAttribute/fetchCategoryAttributes',
+  async ({ categoryId, includeInactive }: { categoryId: string; includeInactive?: boolean }, { rejectWithValue }) => {
     try {
-      const jwt = localStorage.getItem('jwt');
-      
-      // ✅ JWT is optional for GET requests (public data)
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (jwt) {
-        headers['Authorization'] = `Bearer ${jwt}`;
-      }
-
-      console.log('📡 [SLICE] Fetching attributes:', { 
-        categoryId, 
-        includeInactive,
-        hasAuth: !!jwt 
+      const response = await api.get(`/api/admin/categories/${categoryId}/attributes`, {
+        params: { includeInactive }
       });
-
-      const response = await api.get<CategoryAttributeApiResponse>(
-        `${API_BASE}/${categoryId}/attributes`,
-        {
-          headers,
-          params: { includeInactive: includeInactive ? 'true' : 'false' },
-        }
-      );
-
-      // ✅ Validate response structure
-      if (!response.data.success) {
-        throw new Error(response.data.message || 'API returned failure status');
+      
+      console.log('🔍 [Redux Slice] Raw API response:', response.data);
+      
+      // ✅ FIX: Handle the response structure correctly
+      // API returns: { success: true, count: 23, data: [...] }
+      if (response.data && Array.isArray(response.data.data)) {
+        console.log('✅ [Redux Slice] Attributes fetched:', response.data.data.length);
+        return response.data.data;  // ✅ Return the array inside 'data' field
       }
-
-      // ✅ Validate data is an array
-      if (!Array.isArray(response.data.data)) {
-        console.warn('⚠️ Unexpected response format:', response.data);
-        throw new Error('Invalid response format from server');
+      
+      // Fallback: if response is already an array
+      if (Array.isArray(response.data)) {
+        console.log('✅ [Redux Slice] Attributes fetched (array):', response.data.length);
+        return response.data;
       }
-
-      // ✅ Log empty results for debugging
-      if (response.data.data.length === 0) {
-        console.log('ℹ️ No attributes configured for category:', categoryId);
-      } else {
-        console.log('✅ [SLICE] Attributes fetched:', {
-          count: response.data.data.length,
-          names: response.data.data.map(a => a.name)
-        });
-      }
-
-      return response.data.data as CategoryAttribute[];
+      
+      console.warn('⚠️ [Redux Slice] Unexpected response format:', response.data);
+      return [];
       
     } catch (error: any) {
-      console.error('❌ Fetch attributes error:', {
-        message: error.message,
-        status: error.response?.status,
-        categoryId
-      });
-      
-      // ✅ Handle specific HTTP errors
-      if (error.response?.status === 404) {
-        return rejectWithValue('Category attributes not found - endpoint may not exist');
-      }
-      if (error.response?.status === 401) {
-        return rejectWithValue('Authentication required for this endpoint');
-      }
-      if (error.response?.status === 403) {
-        return rejectWithValue('Access denied to category attributes');
-      }
-      
-      // ✅ Generic fallback
-      return rejectWithValue(error.message || 'Failed to fetch attributes');
+      console.error('❌ [Redux Slice] Fetch attributes error:', error);
+      return rejectWithValue(error.response?.data?.message || 'Failed to fetch attributes');
     }
   }
 );
@@ -358,6 +314,12 @@ const categoryAttributeSlice = createSlice({
   name: 'categoryAttribute',
   initialState,
   reducers: {
+
+    resetCategoryAttributes: (state) => {
+      state.attributes = [];
+      state.loading = false;
+      state.error = null;
+    },
     // ✅ Clear attributes for a category (when switching categories)
     clearCategoryAttributes: (state, action: PayloadAction<string>) => {
       if (state.selectedCategoryId === action.payload) {
@@ -398,18 +360,25 @@ const categoryAttributeSlice = createSlice({
         state.error = null;
       })
       .addCase(
-        fetchCategoryAttributes.fulfilled,
-        (state, action: PayloadAction<CategoryAttribute[]>) => {
-          state.loading = false;
-          state.attributes = action.payload;
-          if (action.payload.length > 0) {
-            state.selectedCategoryId = action.payload[0].categoryId;
-          }
-        }
-      )
+  fetchCategoryAttributes.fulfilled,
+  (state, action: PayloadAction<CategoryAttribute[]>) => {
+    console.log('🔍 [Redux Slice] Attributes fetched:', action.payload.length);  // ✅ Debug log
+    state.loading = false;
+    state.attributes = action.payload;  // ✅ Store in state.attributes
+    if (action.payload.length > 0) {
+      state.selectedCategoryId = action.payload[0].categoryId;
+    }
+  }
+)
       .addCase(fetchCategoryAttributes.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload || action.error.message || 'Failed to fetch attributes';
+        state.error = action.payload as string;
+
+        // ✅ Log helpful debug info
+        console.error('❌ [Redux] Attributes fetch failed:', {
+          error: action.payload,
+          message: typeof action.payload === 'string' ? action.payload : 'Unknown error'
+        });
       });
 
     // ✅ fetchAttributesForMultipleCategories
@@ -590,24 +559,33 @@ export const {
   optimisticDelete,
 } = categoryAttributeSlice.actions;
 
-// ✅ Export selector helpers
-export const selectCategoryAttributes = (state: any) =>
-  state.categoryAttribute.attributes;
+export const selectCategoryAttributes = (state: RootState): CategoryAttribute[] => {
+  const attrs = state.categoryAttribute?.attributes || [];
+  console.log('🔍 [Selector] Returning attributes:', attrs.length);  // ✅ Debug log
+  return attrs;
+};
 
-export const selectCategoryAttributesLoading = (state: any) =>
-  state.categoryAttribute.loading;
+export const selectCategoryAttributesLoading = (state: RootState): boolean => {
+  return state.categoryAttribute?.loading || false;
+};
 
-export const selectCategoryAttributesError = (state: any) =>
-  state.categoryAttribute.error;
+export const selectCategoryAttributesError = (state: RootState): string | null => {
+  return state.categoryAttribute?.error || null;
+};
 
-export const selectSelectedCategoryId = (state: any) =>
-  state.categoryAttribute.selectedCategoryId;
+export const selectSelectedCategoryId = (state: RootState): string | undefined | null => {
+  return state.categoryAttribute?.selectedCategoryId;
+};
 
-export const selectActiveAttributes = (state: any) =>
-  state.categoryAttribute.attributes.filter((attr: any) => attr.isActive);
+export const selectActiveAttributes = (state: RootState): CategoryAttribute[] => {
+  return (state.categoryAttribute?.attributes || []).filter((attr: CategoryAttribute) => attr?.isActive);
+};
 
-export const selectAttributeById = (attributeId: string) => (state: any) =>
-  state.categoryAttribute.attributes.find((attr: any) => attr._id === attributeId);
+export const selectAttributeById = (attributeId: string) => (state: RootState): CategoryAttribute | undefined => {
+  return (state.categoryAttribute?.attributes || []).find((attr: CategoryAttribute) => attr?._id === attributeId);
+};
+
+export const { resetCategoryAttributes } = categoryAttributeSlice.actions;
 
 // ✅ Export reducer
 export default categoryAttributeSlice.reducer;

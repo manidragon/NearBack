@@ -35,6 +35,7 @@ router.put(
   productController.updateProduct  // ✅ Already correct
 );
 
-console.log('✅ [SELLER ROUTES] All routes registered successfully');
+// ✅ GET /api/seller/products/catalog-offers
+router.get('/catalog-offers', sellerAuthMiddleware, productController.getSellerCatalogOffers);
 
 module.exports = router;

@@ -15,7 +15,22 @@ class ProductService {
         throw new ProductError("Valid Level 3 category is required");
       }
 
-      // ✅ Process variants: ensure unique SKU, validate images
+      // ✅✅✅ FIX 1: Get category attributes ONCE (outside loop)
+      const CategoryAttribute = mongoose.model('CategoryAttribute');
+      const categoryAttrs = await CategoryAttribute.find({
+        categoryId: category.categoryId,
+        isActive: true
+      });
+
+      const variantFieldNames = categoryAttrs
+        .filter(attr => attr.isVariantField)
+        .map(attr => attr.name.toLowerCase());
+
+      const highlightFieldNames = categoryAttrs
+        .filter(attr => attr.displayInHighlights && !attr.isVariantField)
+        .map(attr => attr.name.toLowerCase());
+
+      // ✅ Process variants: handle offers array + legacy compatibility
       const processedVariants = await Promise.all(
         req.variants.map(async (variant, index) => {
           // Auto-generate SKU if not provided
@@ -29,25 +44,128 @@ class ProductService {
             throw new ProductError(`Variant ${index + 1}: At least one image required`);
           }
 
+          // ✅✅✅ Handle offers array (multi-seller) OR legacy direct fields
+          let finalOffers = variant.offers;
+
+          // If no offers array, convert legacy direct fields to offers array
+          if (!finalOffers || !Array.isArray(finalOffers) || finalOffers.length === 0) {
+            if (variant.mrpPrice === undefined || variant.sellingPrice === undefined) {
+              throw new ProductError(`Variant ${index + 1}: Either 'offers' array or 'mrpPrice/sellingPrice' fields are required`);
+            }
+            // Convert legacy format to offers array
+            finalOffers = [{
+              seller: seller._id,  // ✅ FIX: Use 'seller' (ObjectId) to match schema
+              mrpPrice: Number(variant.mrpPrice),
+              sellingPrice: Number(variant.sellingPrice),
+              stock: Number(variant.stock) || 0,
+              sku: variant.sku,
+              isActive: variant.isActive !== false
+            }];
+          }
+
+          // ✅ Validate each offer in the array
+          for (const [offerIdx, offer] of finalOffers.entries()) {
+            // ✅ FIX: Check 'seller' field (not sellerId)
+            if (!offer.seller) {
+              throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: seller is required`);
+            }
+
+            // Validate and convert prices to numbers
+            const mrpPrice = Number(offer.mrpPrice);
+            const sellingPrice = Number(offer.sellingPrice);
+            const stock = Number(offer.stock) || 0;
+
+            if (!offer.mrpPrice || isNaN(mrpPrice) || mrpPrice <= 0) {
+              throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: Valid MRP Price (>0) is required`);
+            }
+            if (!offer.sellingPrice || isNaN(sellingPrice) || sellingPrice <= 0) {
+              throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: Valid Selling Price (>0) is required`);
+            }
+            if (sellingPrice > mrpPrice) {
+              throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: Selling price cannot exceed MRP`);
+            }
+            if (stock < 0) {
+              throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: Stock cannot be negative`);
+            }
+
+            // Update offer with validated/converted values
+            finalOffers[offerIdx] = {
+              ...offer,
+              seller: offer.seller,  // ✅ Ensure seller is ObjectId
+              mrpPrice,
+              sellingPrice,
+              stock,
+              isActive: offer.isActive !== false
+            };
+          }
+
+          let variantSpecs = {};
+          if (variant.specifications && typeof variant.specifications === 'object') {
+            // ✅ Save all specs as strings (Mongoose Map requirement)
+            Object.entries(variant.specifications).forEach(([key, value]) => {
+              variantSpecs[key] = String(value);
+            });
+          }
+
+          // ✅ Log for debugging (remove after testing)
+          console.log('🔍 [Service] Saving variant specs:', {
+            originalCount: Object.keys(variant.specifications || {}).length,
+            savedCount: Object.keys(variantSpecs).length,
+            savedKeys: Object.keys(variantSpecs)
+          });
+
+          // ✅ Extract highlights for product-level storage
+          const variantHighlights = {};
+          if (req.highlights && typeof req.highlights === 'object') {
+            Object.entries(req.highlights).forEach(([key, value]) => {
+              const keyLower = key.toLowerCase();
+              // Only include if it's a valid highlight field
+              if (highlightFieldNames.includes(keyLower)) {
+                variantHighlights[key] = value;
+              }
+            });
+          }
+
+
+          // ✅ Return processed variant with filtered specs
           return {
             ...variant,
-            specifications: variant.specifications || {},
-            isActive: variant.isActive !== false  // Default true
+            specifications: variantSpecs,  // ✅ ONLY variant-specific fields
+            highlights: Object.keys(variantHighlights).length > 0 ? variantHighlights : undefined,
+            isActive: variant.isActive !== false,
+            offers: finalOffers,
+            variantOwner: seller._id,  // ✅ Set variantOwner BEFORE save
+            // Remove legacy direct fields
+            mrpPrice: undefined,
+            sellingPrice: undefined,
+            stock: undefined
           };
         })
       );
 
-      // Create product with embedded variants
+      // ✅✅✅ FIX 3: Collect highlights from ALL variants (or just first one)
+      const productHighlights = {};
+      for (const variant of processedVariants) {
+        if (variant.highlights) {
+          Object.assign(productHighlights, variant.highlights);
+        }
+      }
+
+      // ✅ Create product with embedded variants (now with offers array)
       const product = new Product({
         title: req.title.trim(),
         description: req.description.trim(),
         category: category._id,
         seller: seller._id,
+        productOwner: seller._id,
+        highlights: req.highlights && Object.keys(req.highlights).length > 0
+          ? new Map(Object.entries(req.highlights))
+          : new Map(),
         variants: processedVariants,
         isActive: req.isActive !== false
-        // ✅ Aggregated fields (colors, specs, prices) auto-calculated by pre-save hook
       });
 
+      // ✅✅✅ FIX 4: Save ONCE (pre-save hook will handle aggregated fields + ownership)
       await product.save();
 
       // ✅ Populate and return with seller info
@@ -62,163 +180,293 @@ class ProductService {
     }
   }
 
-  // ✅ UPDATE product (merge variants)
- async updateProduct(productId, updates, sellerId) {
-  try {
-    // ✅ First, verify product exists and belongs to seller
-    const product = await Product.findOne({ _id: productId, seller: sellerId });
-    if (!product) {
-      throw new ProductError("Product not found or access denied");
-    }
+  async getProductsByQuery(query, page = 0, limit = 20) {
+    try {
+      const Product = require('../models/Product');
 
-    // ✅ Build update object for MongoDB $set operator (top-level fields)
-    const topLevelUpdate = { $set: { updatedAt: new Date() } };
-    
-    // ✅ Update top-level fields if provided
-    const topLevelFields = ['title', 'description', 'isActive', 'isFeatured'];
-    topLevelFields.forEach(field => {
-      if (updates[field] !== undefined && updates[field] !== null) {
-        topLevelUpdate.$set[field] = updates[field];
+      const products = await Product.find(query)
+        .populate('category', 'name categoryId level')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .skip(page * limit);
+
+      return products;
+    } catch (error) {
+      console.error('❌ Get products by query error:', error.message);
+      throw new ProductError(error.message || 'Failed to fetch products');
+    }
+  }
+
+  async updateProduct(productId, updates, sellerId) {
+    console.log('🔍 [DEBUG] updateProduct called:', {
+      productId,
+      sellerId,
+      updatesReceived: {
+        variantsCount: updates.variants?.length,
+        firstVariant: updates.variants?.[0] ? {
+          color: updates.variants[0].color,
+          offersCount: updates.variants[0].offers?.length,
+          firstOffer: updates.variants[0].offers?.[0] ? {
+            _id: updates.variants[0].offers[0]._id,
+            seller: updates.variants[0].offers[0].seller,
+            stock: updates.variants[0].offers[0].stock
+          } : null
+        } : null
       }
     });
 
-    // ✅ Execute top-level fields update if there are changes
-    if (Object.keys(topLevelUpdate.$set).length > 1) {
-      await Product.updateOne(
-        { _id: productId, seller: sellerId },
-        topLevelUpdate,
-        { runValidators: true }
-      );
-    }
+    try {
+      // ✅ 1. Fetch product with full details
+      const product = await Product.findById(productId)
+        .populate('variants.offers.seller', 'sellerName businessDetails.businessName');
 
-    // ✅✅✅ Handle variant updates - Support updating, adding, AND deleting variants
-    if (updates.variants && Array.isArray(updates.variants) && updates.variants.length > 0) {
-      const existingVariants = new Map(
-        product.variants.map(v => [String(v._id), v])
-      );
-      
-      const variantsToUpdate = [];
-      const variantsToAdd = [];
-      const incomingVariantIds = new Set();  // ✅ Track IDs in incoming payload
-      
-      // ✅ Separate variants into "update existing" vs "add new"
-      for (const updateVar of updates.variants) {
-        // ✅ Check if this is an existing variant (has valid 24-char hex _id)
-        const isValidExistingId = updateVar._id && 
-                                  typeof updateVar._id === 'string' && 
-                                  updateVar._id.length === 24 &&
-                                  existingVariants.has(updateVar._id);
-        
-        if (isValidExistingId) {
-          variantsToUpdate.push(updateVar);
-          incomingVariantIds.add(updateVar._id);  // ✅ Track this ID
-        } else {
-          variantsToAdd.push(updateVar);
-        }
+      console.log('🔍 [DEBUG] Product fetched:', {
+        found: !!product,
+        variantsCount: product?.variants?.length,
+        firstVariantOffers: product?.variants?.[0]?.offers?.length
+      });
+
+      if (!product) {
+        console.error('❌ [DEBUG] Product not found');
+        throw new ProductError("Product not found");
       }
-      
-      // ✅✅✅ Process UPDATES to existing variants using arrayFilters
-      for (const updateVar of variantsToUpdate) {
-        const variantUpdate = { $set: {} };
-        
-        // Simple fields
-        if (updateVar.color !== undefined) variantUpdate.$set[`variants.$[elem].color`] = updateVar.color;
-        if (updateVar.mrpPrice !== undefined) variantUpdate.$set[`variants.$[elem].mrpPrice`] = updateVar.mrpPrice;
-        if (updateVar.sellingPrice !== undefined) variantUpdate.$set[`variants.$[elem].sellingPrice`] = updateVar.sellingPrice;
-        if (updateVar.stock !== undefined) variantUpdate.$set[`variants.$[elem].stock`] = updateVar.stock;
-        if (updateVar.images !== undefined) variantUpdate.$set[`variants.$[elem].images`] = updateVar.images;
-        if (updateVar.sku !== undefined) variantUpdate.$set[`variants.$[elem].sku`] = updateVar.sku;
-        if (updateVar.isActive !== undefined) variantUpdate.$set[`variants.$[elem].isActive`] = updateVar.isActive;
-        
-        // ✅ Handle specifications as plain object (replace entire object)
-        if (updateVar.specifications && typeof updateVar.specifications === 'object') {
-          const specsObj = {};
-          Object.entries(updateVar.specifications).forEach(([key, value]) => {
-            specsObj[key] = String(value);
+
+      // ✅ 2. Authorization check
+      const sellerHasOffer = product.variants.some(v =>
+        v.offers?.some(o => {
+          // ✅ Handle both populated seller object AND string/ObjectId seller
+          const offerSellerId = typeof o.seller === 'string'
+            ? o.seller
+            : o.seller?._id?.toString() || o.seller?.toString();
+
+          return offerSellerId === sellerId.toString() && o.isActive !== false;
+        })
+      );
+
+      const isProductOwner = typeof product.seller === 'string'
+        ? product.seller === sellerId.toString()
+        : product.seller?._id?.toString() === sellerId.toString();
+
+      console.log('🔍 [DEBUG] Authorization:', {
+        sellerHasOffer,
+        isProductOwner,
+        productSeller: product.seller?.toString(),
+        requestSeller: sellerId
+      });
+
+      if (!sellerHasOffer && !isProductOwner) {
+        console.error('❌ [DEBUG] Access denied');
+        throw new ProductError("Access denied: You don't have offers in this product");
+      }
+
+      // ✅ 3. Build update operations
+      const updateOps = [];
+
+      // ✅ 4. Handle variant updates
+      if (updates.variants && Array.isArray(updates.variants)) {
+        for (const updateVar of updates.variants) {
+          console.log('🔍 [DEBUG] Processing variant update:', {
+            updateVarId: updateVar._id,
+            updateVarColor: updateVar.color
           });
-          variantUpdate.$set[`variants.$[elem].specifications`] = specsObj;
-        }
-        
-        if (Object.keys(variantUpdate.$set).length > 0) {
-          await Product.updateOne(
-            { 
-              _id: productId, 
-              seller: sellerId, 
-              'variants._id': new mongoose.Types.ObjectId(updateVar._id) 
-            },
-            variantUpdate,
-            { 
-              arrayFilters: [{ 'elem._id': new mongoose.Types.ObjectId(updateVar._id) }],
-              runValidators: true 
-            }
-          );
-        }
-      }
-      
-      // ✅✅✅ Process ADDITIONS of new variants using $push
-      if (variantsToAdd.length > 0) {
-        const newVariants = variantsToAdd.map(newVar => {
-          const variantId = newVar._id || new mongoose.Types.ObjectId();
-          return {
-            _id: variantId,
-            color: newVar.color || '',
-            specifications: new Map(Object.entries(newVar.specifications || {}).map(([k, v]) => [k, String(v)])),
-            mrpPrice: newVar.mrpPrice || 0,
-            sellingPrice: newVar.sellingPrice || 0,
-            stock: newVar.stock || 0,
-            images: newVar.images || [],
-            sku: newVar.sku || `${updates.title?.toLowerCase().slice(0,20) || 'product'}-${newVar.color || 'new'}-${Date.now()}`.substring(0, 100),
-            isActive: newVar.isActive !== false,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          };
-        });
-        
-        await Product.updateOne(
-          { _id: productId, seller: sellerId },
-          { $push: { variants: { $each: newVariants } } },
-          { runValidators: true }
-        );
-      }
-      
-      // ✅✅✅ CRITICAL: Delete variants that are NOT in the incoming payload (full replacement approach)
-      const variantsToDelete = Array.from(existingVariants.keys()).filter(id => !incomingVariantIds.has(id));
-      
-      if (variantsToDelete.length > 0) {
-        await Product.updateOne(
-          { _id: productId, seller: sellerId },
-          { 
-            $pull: { 
-              variants: { 
-                _id: { $in: variantsToDelete.map(id => new mongoose.Types.ObjectId(id)) } 
-              } 
-            } 
-          },
-          { runValidators: true }
-        );
-        console.log('🗑️ Deleted variants:', variantsToDelete);
-      }
-    }
 
-    // ✅ Fetch and return the fully updated product
-    const updatedProduct = await Product.findById(productId)
-      .populate('seller', 'sellerName businessDetails.businessName');
-    
-    if (!updatedProduct) {
-      throw new ProductError("Failed to fetch updated product");
+          // Find existing variant
+          const existingVariant = product.variants.find(v => v._id.toString() === updateVar._id);
+          console.log('🔍 [DEBUG] Found existing variant:', {
+            found: !!existingVariant,
+            variantId: existingVariant?._id?.toString(),
+            offersCount: existingVariant?.offers?.length
+          });
+
+          if (!existingVariant) {
+            console.warn('⚠️ [DEBUG] Variant not found in product, skipping');
+            continue;
+          }
+
+          // ✅ Process offers
+          if (updateVar.offers && Array.isArray(updateVar.offers)) {
+            for (const offerUpdate of updateVar.offers) {
+              console.log('🔍 [DEBUG] Processing offer update:', {
+                offerUpdateId: offerUpdate._id,
+                offerUpdateSeller: offerUpdate.seller,
+                offerUpdateStock: offerUpdate.stock
+              });
+
+              // Find existing offer by _id
+              let existingOffer = existingVariant.offers?.find(
+                o => o._id?.toString() === offerUpdate._id?.toString()
+              );
+
+              // Fallback: find by seller if _id missing
+              if (!existingOffer && !offerUpdate._id) {
+                existingOffer = existingVariant.offers?.find(
+                  o => o.seller?.toString() === sellerId.toString()
+                );
+                console.log('⚠️ [DEBUG] Fallback match by seller ID');
+              }
+
+              console.log('🔍 [DEBUG] Found existing offer:', {
+                found: !!existingOffer,
+                offerId: existingOffer?._id?.toString(),
+                offerSeller: existingOffer?.seller?.toString(),
+                currentStock: existingOffer?.stock
+              });
+
+              if (!existingOffer) {
+                console.warn('⚠️ [DEBUG] No matching offer found, skipping');
+                continue;
+              }
+
+              const offerSellerId = typeof existingOffer.seller === 'string'
+                ? existingOffer.seller
+                : existingOffer.seller?._id?.toString() || existingOffer.seller?.toString();
+
+              if (offerSellerId !== sellerId.toString()) {
+                console.log('🚫 [DEBUG] Skipping offer: not owned by current seller', {
+                  offerSellerId,
+                  currentSeller: sellerId.toString()
+                });
+                continue;
+              }
+
+              // ✅ Build update
+              const offerUpdates = {};
+              if (offerUpdate.mrpPrice !== undefined) offerUpdates['variants.$[v].offers.$[o].mrpPrice'] = offerUpdate.mrpPrice;
+              if (offerUpdate.sellingPrice !== undefined) offerUpdates['variants.$[v].offers.$[o].sellingPrice'] = offerUpdate.sellingPrice;
+              if (offerUpdate.stock !== undefined) offerUpdates['variants.$[v].offers.$[o].stock'] = offerUpdate.stock;
+              if (offerUpdate.sku !== undefined) offerUpdates['variants.$[v].offers.$[o].sku'] = offerUpdate.sku;
+              if (offerUpdate.isActive !== undefined) offerUpdates['variants.$[v].offers.$[o].isActive'] = offerUpdate.isActive;
+              offerUpdates['variants.$[v].offers.$[o].updatedAt'] = new Date();
+
+              console.log('🔍 [DEBUG] Offer updates to apply:', offerUpdates);
+
+              if (Object.keys(offerUpdates).length > 0) {
+                // ✅ Execute update
+                const result = await Product.updateOne(
+                  {
+                    _id: productId,
+                    'variants._id': new mongoose.Types.ObjectId(updateVar._id),
+                    'variants.offers._id': new mongoose.Types.ObjectId(existingOffer._id)
+                  },
+                  { $set: offerUpdates },
+                  {
+                    arrayFilters: [
+                      { 'v._id': new mongoose.Types.ObjectId(updateVar._id) },
+                      { 'o._id': new mongoose.Types.ObjectId(existingOffer._id) }
+                    ],
+                    runValidators: true
+                  }
+                );
+
+                console.log('✅ [DEBUG] MongoDB update result:', {
+                  matchedCount: result.matchedCount,
+                  modifiedCount: result.modifiedCount,
+                  acknowledged: result.acknowledged
+                });
+
+                if (result.modifiedCount === 0) {
+                  console.error('❌ [DEBUG] Update matched but modified 0 documents!');
+                  console.error('🔍 [DEBUG] Query filters:', {
+                    productId,
+                    variantId: updateVar._id,
+                    offerId: existingOffer._id
+                  });
+                }
+              }
+            }
+          }
+
+          const variantLevelUpdates = {};
+
+          // ✅ Update images if provided
+          if (updateVar.images && Array.isArray(updateVar.images)) {
+            variantLevelUpdates['variants.$[v].images'] = updateVar.images;
+          }
+
+          // ✅ Update color if provided (optional)
+          if (updateVar.color !== undefined) {
+            variantLevelUpdates['variants.$[v].color'] = updateVar.color;
+          }
+
+          // ✅ Update isActive if provided (optional)
+          if (updateVar.isActive !== undefined) {
+            variantLevelUpdates['variants.$[v].isActive'] = updateVar.isActive;
+          }
+
+          // ✅ Execute variant-level updates if any
+          if (Object.keys(variantLevelUpdates).length > 0) {
+            await Product.updateOne(
+              {
+                _id: productId,
+                'variants._id': new mongoose.Types.ObjectId(updateVar._id)
+              },
+              { $set: variantLevelUpdates },
+              {
+                arrayFilters: [{ 'v._id': new mongoose.Types.ObjectId(updateVar._id) }],
+                runValidators: true
+              }
+            );
+
+            console.log('✅ [DEBUG] Variant-level updates applied:', variantLevelUpdates);
+          }
+        }
+      }
+
+     // ✅ CORRECT: Use for...of loop for async operations
+const topLevelFields = ['title', 'description', 'isActive', 'isFeatured'];
+const topLevelUpdates = {};
+
+for (const field of topLevelFields) {
+  if (updates[field] !== undefined && updates[field] !== null) {
+    // ✅ If catalog product, only allow catalog owner to update these fields
+    if (product.catalog) {
+      const catalogProduct = await Product.findById(product.catalog).select('seller');
+      const isCatalogOwner = catalogProduct?.seller?.toString() === sellerId.toString();
+      
+      if (!isCatalogOwner) {
+        console.log(`🚫 [DEBUG] Skipping ${field} update: not catalog owner`);
+        continue;  // ✅ Use continue instead of return
+      }
     }
-    
-    return updatedProduct;
-    
-  } catch (error) {
-    console.error("❌ Update product error:", error.message);
-    if (error.name === 'MongoServerError' && error.code === 11000) {
-      throw new ProductError("Duplicate SKU detected. Please use unique values.");
-    }
-    throw new ProductError(error.message || "Failed to update product");
+    topLevelUpdates[field] = updates[field];
   }
 }
 
+// ✅ Execute top-level fields update if there are changes
+if (Object.keys(topLevelUpdates).length > 0) {
+  await Product.updateOne(
+    { _id: productId },
+    { $set: { ...topLevelUpdates, updatedAt: new Date() } },
+    { runValidators: true }
+  );
+  console.log('✅ [DEBUG] Top-level updates applied:', topLevelUpdates);
+}
+
+      // ✅ 5. Recalculate aggregated fields
+      await Product.updateCatalogPrices(productId);
+      console.log('✅ [DEBUG] Recalculated catalog prices');
+
+      // ✅ 6. Fetch and return updated product
+      const updatedProduct = await Product.findById(productId)
+        .populate('seller', 'sellerName businessDetails.businessName')
+        .populate('variants.offers.seller', 'sellerName businessDetails.businessName');
+
+      console.log('✅ [DEBUG] Returning updated product:', {
+        variantsCount: updatedProduct?.variants?.length,
+        blackVariant6GB: updatedProduct?.variants?.find(v => v.color === 'Black' && v.specifications?.storage === '256 GB')?.offers?.[0]?.stock
+      });
+
+      return updatedProduct;
+
+    } catch (error) {
+      console.error('❌ [DEBUG] Update product error:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      throw new ProductError(error.message || "Failed to update product");
+    }
+  }
   // ✅ GET product with color/variant filtering
   async getProductById(productId, filters = {}) {
     try {
@@ -283,60 +531,42 @@ class ProductService {
   // ✅ GET seller's products - FIXED: Complete field projection for ProductTable
   async getSellerProducts(sellerId, page = 0, limit = 20) {
     try {
-      // ✅ FIXED: Include ALL fields needed for ProductTable display
-      const products = await Product.find({
-        seller: sellerId,
-        isActive: true
-      })
-      .populate('seller', 'sellerName businessDetails.businessName') 
-        .select(`
-        _id title  category description
-        minPrice maxPrice isActive isFeatured createdAt updatedAt
-        variants._id variants.color variants.mrpPrice variants.sellingPrice 
-        variants.stock variants.images variants.sku variants.isActive variants.specifications
-      `)
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .skip(page * limit);
+      // ✅ Query for products
+      const products = await Product.find({ seller: sellerId, isActive: true })
+        .populate('seller', 'sellerName businessDetails.businessName')
+        .populate('variants.offers.seller', 'sellerName businessDetails.businessName')
+        .populate('category', 'name categoryId level')
+        .lean();
 
-      const total = await Product.countDocuments({
-        seller: sellerId,
-        isActive: true
+      // ✅ Transform to ensure specifications are plain objects
+      const transformedProducts = products.map(product => {
+        if (product.variants && Array.isArray(product.variants)) {
+          product.variants = product.variants.map(variant => {
+            if (variant.specifications instanceof Map) {
+              variant.specifications = Object.fromEntries(variant.specifications);
+            }
+            if (variant.variantOwner && typeof variant.variantOwner !== 'string') {
+              variant.variantOwner = variant.variantOwner._id || variant.variantOwner.$oid || String(variant.variantOwner);
+            }
+            return variant;
+          });
+        }
+        if (product.highlights instanceof Map) {
+          product.highlights = Object.fromEntries(product.highlights);
+        }
+        return product;
       });
 
-      // ✅ DEBUG LOGGING - Remove in production
-      console.log('🔍 [DEBUG] getSellerProducts:', {
-        sellerId,
-        page,
-        limit,
-        foundCount: products.length,
-        total,
-        productIds: products.map(p => p._id),
-        firstProduct: products[0] ? {
-          _id: products[0]._id,
-          title: products[0].title,
-          variantCount: products[0].variants?.length,
-          firstVariant: products[0].variants?.[0] ? {
-            _id: products[0].variants[0]._id,
-            color: products[0].variants[0].color,
-            mrpPrice: products[0].variants[0].mrpPrice,
-            sellingPrice: products[0].variants[0].sellingPrice,
-            stock: products[0].variants[0].stock,
-            images: products[0].variants[0].images?.length,
-            sku: products[0].variants[0].sku,
-            isActive: products[0].variants[0].isActive,
-            specifications: products[0].variants[0].specifications
-          } : null
-        } : null
-      });
+      // ✅✅✅ ADD THIS: Get total count for pagination
+      const total = await Product.countDocuments({ seller: sellerId, isActive: true });
 
       return {
-        products,
+        products: transformedProducts,
         pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit)
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,  // ✅ Now defined!
+          totalPages: Math.ceil(total / parseInt(limit))
         }
       };
     } catch (error) {

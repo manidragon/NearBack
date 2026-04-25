@@ -13,55 +13,108 @@ export type CategoryReference =
       parentCategory?: string | null;
     };
 
-// ✅ Product Variant interface (for embedded variants array)
-export interface ProductVariant {
+// ✅✅✅ NEW: Product Offer interface (multi-seller support)
+export interface ProductOffer {
   _id?: string;
-  color: string;
-  specifications: Record<string, string | number | boolean>;
+  // ✅ Backend expects "seller" (ObjectId string or populated object)
+  seller: string | { 
+    _id: string; 
+    sellerName?: string; 
+    businessDetails?: { businessName?: string };
+    [key: string]: any;
+  };
   mrpPrice: number;
   sellingPrice: number;
   stock: number;
-  images: string[];
   sku?: string;
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
 
-// ✅ Product Variant Form interface (for frontend forms - string inputs)
+// ✅✅✅ UPDATED: Product Variant with offers array (PRIMARY) + legacy fallback
+export interface ProductVariant {
+  _id?: string;
+  color: string;
+  specifications: Record<string, string | number | boolean>;
+  images: string[];
+  
+  // ✅ NEW: Multi-seller offers array (PRIMARY structure)
+  offers?: ProductOffer[];
+  
+  // ✅ Legacy direct fields (OPTIONAL - for backward compatibility)
+  mrpPrice?: number;
+  sellingPrice?: number;
+  stock?: number;
+  
+  sku?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// ✅✅✅ UPDATED: Product Variant Form (for frontend - string inputs + offers)
 export interface ProductVariantForm {
   _id?: string;
   color: string;
   specifications: Record<string, string | number | boolean>;
-  mrpPrice: string;        // String for form input
-  sellingPrice: string;    // String for form input
-  stock: string;           // String for form input
   images: string[];
+  
+  // ✅ NEW: Offers array for form (sellerId string, price/stock as strings)
+  offers?: Array<{
+    _id?: string;
+    sellerId: string;  // ✅ Frontend uses sellerId (from JWT)
+    mrpPrice: string;  // String for form input
+    sellingPrice: string;
+    stock: string;
+    sku?: string;
+    isActive: boolean;
+    toBeDeleted?: boolean;  // UI helper for marking deletion
+  }>;
+  
+  // ✅ Legacy direct fields (OPTIONAL - for backward compatibility)
+  mrpPrice?: string;
+  sellingPrice?: string;
+  stock?: string;
+  
   sku?: string;
   isActive?: boolean;
   
   // UI helpers (not sent to backend)
   tempImages?: File[];
   isExpanded?: boolean;
+  isFromCatalog?: boolean;
+  toBeDeleted?: boolean;
 }
 
-// ✅ Product interface - COMPLETE with all fields for ProductDetails.tsx
+// ✅✅✅ UPDATED: Product interface - COMPLETE with offers support
 export interface Product {
   // ✅ Required core fields
   _id?: string;
   title: string;
   description: string;
   
-  // ✅ Price fields (required for legacy products without variants)
-  mrpPrice: number;
-  sellingPrice: number;
+  // ✅ Price fields (denormalized for quick access - OPTIONAL if using variants)
+  mrpPrice?: number;
+  sellingPrice?: number;
   discountPercent?: number;
+  
+  // ✅ Denormalized price range (for filtering)
+  minPrice?: number;
+  maxPrice?: number;
   
   // ✅ Images array (required for gallery)
   images: string[];
   
   // ✅ Category reference (flexible type)
   category: CategoryReference;
+
+  catalog?: {
+    _id: string;
+    title: string;
+    lowestPrice?: number;
+    totalOffers?: number;
+  };
   
   // ✅ Seller with optional businessDetails
   seller?: {
@@ -73,21 +126,19 @@ export interface Product {
       businessName?: string;
       businessAddress?: string;
       gstNumber?: string;
-      [key: string]: any;  // Allow additional fields
+      [key: string]: any;
     };
-    [key: string]: any;  // Allow additional seller fields
+    [key: string]: any;
   };
   
-  // ✅ Variants array (optional - for advanced products)
+  // ✅✅✅ Variants array with offers (PRIMARY structure)
   variants?: ProductVariant[];
   
   // ✅ Aggregated helper fields (for filtering/SEO)
   availableColors?: string[];
   availableSpecs?: Record<string, string[]>;
-  minPrice?: number;
-  maxPrice?: number;
   
-  // ✅ Product attributes (legacy - for simple products)
+  // ✅ Legacy fields (for backward compatibility with simple products)
   color?: string;
   sizes?: string;
   quantity?: number;
@@ -106,9 +157,12 @@ export interface Product {
   // ✅ Timestamps
   createdAt?: string;
   updatedAt?: string;
+  
+  // ✅ Allow additional fields from API (flexible)
+  [key: string]: any;
 }
 
-// ✅ Product Form Values interface (for AddProductForm.tsx)
+// ✅✅✅ UPDATED: Product Form Values (for AddProductForm.tsx)
 export interface ProductFormValues {
   _id?: string;
   title: string;
@@ -119,12 +173,13 @@ export interface ProductFormValues {
   category2?: string;      // Level 2 category _id
   category3?: string;      // Level 3 category _id (final)
   
-  
-  
-  // ✅ Variants array (primary data for advanced products)
+  // ✅✅✅ Variants array with offers (PRIMARY)
   variants: ProductVariantForm[];
   
-  // ✅ Legacy fields (for backward compatibility with simple products)
+  // ✅ Highlights for displayInHighlights attributes
+  highlights?: Record<string, string | number | boolean>;
+  
+  // ✅ Legacy fields (OPTIONAL - for backward compatibility)
   mrpPrice?: string;
   sellingPrice?: string;
   images?: string[];
@@ -136,6 +191,13 @@ export interface ProductFormValues {
   // ✅ Metadata
   isActive?: boolean;
   isFeatured?: boolean;
+  
+  // ✅ Catalog mode state
+  catalogMode?: {
+    isCatalogProduct: boolean;
+    catalogId?: string;
+    isOwner: boolean;
+  };
 }
 
 // ✅ Cart Item interface (for cart operations)
@@ -165,4 +227,47 @@ export interface OrderItem extends CartItem {
     status?: string;
     updatedAt?: string;
   };
+}
+
+export interface CatalogProduct extends Omit<Product, 'variants'> {
+  variantTemplate?: ProductVariant[];  // ✅ Catalog uses this field name
+  createdBy?: {
+    _id: string;
+    sellerName?: string;
+    businessDetails?: { businessName?: string };
+  };
+  isOwner?: boolean;  // ✅ Backend-provided ownership flag
+  lowestPrice?: number;
+  highestPrice?: number;
+  totalOffers?: number;
+}
+
+export interface UpdateProductSubVariantForm {
+  _id?: string;
+  specifications: Record<string, string | number | boolean>;
+  mrpPrice: string;  // String for form input
+  sellingPrice: string;
+  stock: string;
+  sku?: string;
+  isActive?: boolean;
+  toBeDeleted?: boolean;  // UI helper
+}
+
+export interface UpdateProductVariantForm {
+  _id?: string;
+  color: string;
+  images: string[];
+  subVariants: UpdateProductSubVariantForm[];
+  isActive?: boolean;
+}
+
+export interface UpdateProductFormValues extends Omit<ProductFormValues, 'variants'> {
+  variants: UpdateProductVariantForm[];
+}
+
+export interface CatalogModeState {
+  isCatalogProduct: boolean;
+  catalogId?: string;
+  selectedVariants?: ProductVariant[];
+  isOwner: boolean;
 }

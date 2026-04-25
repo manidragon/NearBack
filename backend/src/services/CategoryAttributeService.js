@@ -89,38 +89,30 @@ class CategoryAttributeService {
    * @param {boolean} includeInactive - Include deactivated attributes (admin view)
    * @returns {Promise<CategoryAttribute[]>}
    */
-  async getAttributesByCategory(categoryId, includeInactive = false) {
-    try {
-      // ✅ Validate category exists
-      const category = await Category.findOne({ categoryId, level: 3 });
-      if (!category) {
-        throw new CategoryAttributeError(
-          `Category "${categoryId}" not found or is not a Level 3 category`
-        );
-      }
+async getAttributesByCategory(categoryId, includeInactive = false) {
+  try {
+    console.log('📥 [Service] Fetching attributes for categoryId:', categoryId, { includeInactive });
 
-      // ✅ Build query
-      const query = { categoryId };
-      if (!includeInactive) {
-        query.isActive = true;
-      }
-
-      // ✅ Fetch and sort by order, then name
-      const attributes = await CategoryAttribute.find(query)
-        .sort({ order: 1, name: 1 })
-        .lean();
-
-      console.log(`✅ Found ${attributes.length} attributes for category "${categoryId}"`);
-
-      return attributes;
-    } catch (error) {
-      console.error('❌ Get attributes error:', error.message);
-      if (error instanceof CategoryAttributeError) {
-        throw error;
-      }
-      throw new CategoryAttributeError(error.message || 'Failed to fetch attributes');
+    if (!categoryId) {
+      throw new CategoryAttributeError('Category ID is required');
     }
+
+    // ✅ Build query with categoryId (slug) and optional isActive filter
+    const query = { categoryId: categoryId.toLowerCase() };
+    if (!includeInactive) {
+      query.isActive = true;
+    }
+
+    const attributes = await CategoryAttribute.find(query)
+      .sort({ sortOrder: 1, order: 1, name: 1 });
+
+    console.log('✅ [Service] Found attributes:', attributes.length);
+    return attributes;
+  } catch (error) {
+    console.error('❌ [Service] Get attributes error:', error.message);
+    throw new CategoryAttributeError(error.message || 'Failed to fetch category attributes');
   }
+}
 
   /**
    * ✅ Get a single attribute by ID

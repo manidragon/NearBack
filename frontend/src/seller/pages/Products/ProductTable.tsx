@@ -20,23 +20,28 @@ import {
   Alert,
   CircularProgress,
   Snackbar,
+  Tabs,
+  Tab,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import StoreIcon from '@mui/icons-material/Store';
 import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
-import { fetchSellerProducts, updateProduct, deleteProduct, resetUpdateFlag } from '../../../Redux Toolkit/Seller/sellerProductSlice';
+import {
+  fetchSellerProducts,
+  updateProduct,
+  deleteProduct,
+  resetUpdateFlag,
+  fetchSellerCatalogOffers  // ✅ NEW: Action to fetch catalog offers
+} from '../../../Redux Toolkit/Seller/sellerProductSlice';
 import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
 import Dialog from '@mui/material/Dialog';
-import AddProductForm from './AddProductForm';
-import { type Product, type ProductVariant } from '../../../types/productTypes';
 import UpdateProductForm from './UpdateProductForm';
-import type {
-  ProductFormValues,
-  ProductVariantForm,
-  ProductSubVariantForm
-} from '../../../seller/pages/Products/AddProductForm';
+import { type Product, type ProductVariant } from '../../../types/productTypes';
+import type { Category } from '../../../types/categoryTypes';
 
 // ============================================
 // ✅ Styled Components
@@ -62,6 +67,30 @@ const StyledTableRow = styled(TableRow)(({ theme }) => ({
 }));
 
 // ============================================
+// ✅ Tab Panel Component (for tab content)
+// ============================================
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`product-tabpanel-${index}`}
+      aria-labelledby={`product-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+// ============================================
 // ✅ Row Component Props
 // ============================================
 interface RowProps {
@@ -69,43 +98,129 @@ interface RowProps {
   onEdit: (product: Product) => void;
   onDelete: (productId: string) => void;
   getCategoryName: (categoryId: any) => string;
+  isCatalogOffer?: boolean;
+  onStatusToggle: (productId: string, variantId: string, offerId: string, isActive: boolean) => void;  // <-- ADD THIS
 }
 
 // ============================================
-// ✅ Row Component for Expandable Variant Details
+// ✅ Row Component - Enhanced for Catalog Offers
 // ============================================
-function Row({ row, onEdit, onDelete, getCategoryName }: RowProps) {
+function Row({ row, onEdit, onDelete, getCategoryName, isCatalogOffer = false, onStatusToggle }: RowProps) {
   const [open, setOpen] = React.useState(false);
 
-  // ✅ Group variants by color for display (backend returns flattened array)
-  const variantsByColor = React.useMemo(() => {
-    if (!row.variants || row.variants.length === 0) return {};
+  // ✅ Debug: Log product structure on mount
+  React.useEffect(() => {
+    if (open) {
+      console.log('🔍 [Row Debug] Product data:', {
+        title: row.title,
+        variantsCount: row.variants?.length,
+        isCatalogOffer,
+        catalogId: row.catalog?._id || row.catalog,
+        minPrice: row.minPrice,
+        maxPrice: row.maxPrice
+      });
+    }
+  }, [open, row, isCatalogOffer]);
 
-    return row.variants.reduce((acc: Record<string, ProductVariant[]>, variant: ProductVariant) => {
-      const color = variant.color || 'Unknown';
+  // ✅ Group variants by color
+  const variantsByColor = React.useMemo(() => {
+    if (!row.variants || !Array.isArray(row.variants) || row.variants.length === 0) {
+      return {};
+    }
+    const grouped = row.variants.reduce((acc: Record<string, any>, variant: any) => {
+      const color = variant?.color || 'Unknown';
       if (!acc[color]) acc[color] = [];
       acc[color].push(variant);
       return acc;
     }, {});
+    return grouped;
   }, [row.variants]);
 
-  // ✅ Get price range across all variants
+  // ✅✅✅ FIXED: Get price range - prioritize denormalized fields
   const priceRange = React.useMemo(() => {
-    if (!row.variants || row.variants.length === 0) {
-      return { min: row.sellingPrice || 0, max: row.sellingPrice || 0 };
+    if (row.minPrice != null && row.maxPrice != null) {
+      return { min: Number(row.minPrice), max: Number(row.maxPrice) };
     }
-    const prices = row.variants.map((v: ProductVariant) => v.sellingPrice).filter((p): p is number => p != null);
+    if (!row.variants || !Array.isArray(row.variants)) {
+      return { min: 0, max: 0 };
+    }
+    const allPrices: number[] = [];
+    row.variants.forEach((variant: any) => {
+      if (variant.offers && Array.isArray(variant.offers)) {
+        variant.offers.forEach((offer: any) => {
+          if (offer?.isActive !== false && offer?.sellingPrice != null) {
+            allPrices.push(Number(offer.sellingPrice));
+          }
+        });
+      } else if (variant?.sellingPrice != null && variant?.sellingPrice > 0) {
+        allPrices.push(Number(variant.sellingPrice));
+      }
+    });
     return {
-      min: prices.length > 0 ? Math.min(...prices) : 0,
-      max: prices.length > 0 ? Math.max(...prices) : 0,
+      min: allPrices.length > 0 ? Math.min(...allPrices) : 0,
+      max: allPrices.length > 0 ? Math.max(...allPrices) : 0,
     };
-  }, [row.variants, row.sellingPrice]);
+  }, [row.variants, row.minPrice, row.maxPrice]);
 
-  // ✅ Get total stock across all variants
+  // ✅✅✅ FIXED: Get total stock
   const totalStock = React.useMemo(() => {
-    if (!row.variants || row.variants.length === 0) return row.quantity || 0;
-    return row.variants.reduce((sum: number, v: ProductVariant) => sum + (v.stock || 0), 0);
-  }, [row.variants, row.quantity]);
+    if (!row.variants || !Array.isArray(row.variants)) return 0;
+    return row.variants.reduce((sum: number, variant: any) => {
+      if (variant.offers && Array.isArray(variant.offers)) {
+        return sum + variant.offers.reduce((offerSum: number, offer: any) =>
+          offerSum + (Number(offer?.stock) || 0), 0
+        );
+      }
+      return sum + (Number(variant?.stock) || 0);
+    }, 0);
+  }, [row.variants]);
+
+  // ✅✅✅ FIXED: Get best offer
+  const getBestOffer = (variant: any) => {
+    if (variant?.offers && Array.isArray(variant.offers)) {
+      const activeOffers = variant.offers.filter((o: any) =>
+        o?.isActive !== false && o?.sellingPrice != null && o?.sellingPrice > 0
+      );
+      if (activeOffers.length > 0) {
+        return activeOffers.reduce((best: any, current: any) =>
+          Number(current.sellingPrice) < Number(best.sellingPrice) ? current : best
+        );
+      }
+    }
+    if (variant?.sellingPrice != null && variant?.sellingPrice > 0) {
+      return variant;
+    }
+    return null;
+  };
+
+  // ✅ Get variant selector specs ONLY
+  const getVariantSelectorSpecs = (variant: any) => {
+    if (!variant?.specifications) return {};
+    const variantFields = ['ram', 'storage', 'size', 'color', 'weight', 'networktype'];
+    const specs: Record<string, any> = {};
+    Object.entries(variant.specifications).forEach(([key, value]) => {
+      if (variantFields.includes(key.toLowerCase())) {
+        specs[key] = value;
+      }
+    });
+    return specs;
+  };
+
+  // ✅✅✅ FIXED: Count active offers correctly
+  const countActiveOffers = (variant: any) => {
+    if (!variant?.offers || !Array.isArray(variant.offers)) return 0;
+    return variant.offers.filter((o: any) => o?.isActive !== false).length;
+  };
+
+  // ✅✅✅ FIXED: Get seller name safely
+  const getSellerName = (offer: any) => {
+    if (!offer?.seller) return 'Seller';
+    if (offer.seller?.businessDetails?.businessName) return offer.seller.businessDetails.businessName;
+    if (offer.seller?.sellerName) return offer.seller.sellerName;
+    if (typeof offer.seller === 'string') return 'Seller';
+    if (offer.seller?.$oid) return 'Seller';
+    return 'Seller';
+  };
 
   return (
     <React.Fragment>
@@ -122,7 +237,7 @@ function Row({ row, onEdit, onDelete, getCategoryName }: RowProps) {
               <img
                 key={index}
                 className='w-12 h-12 rounded-md object-cover border'
-                src={image}
+                src={image?.trim()}
                 alt={`Product ${index + 1}`}
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = 'https://via.placeholder.com/48?text=No+Image';
@@ -131,29 +246,50 @@ function Row({ row, onEdit, onDelete, getCategoryName }: RowProps) {
             ))}
           </div>
         </StyledTableCell>
-        <StyledTableCell align="right">
-          <div className="flex flex-col items-end">
-            <Typography variant="body2" fontWeight="bold">{row.title}</Typography>
-            {row.brand && <Typography variant="caption" color="text.secondary">{row.brand}</Typography>}
-          </div>
+
+        {/* ✅ Title Column */}
+        <StyledTableCell align="left">
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" fontWeight="medium" className="max-w-[200px] truncate" title={row.title}>
+              {row.title || 'N/A'}
+            </Typography>
+            {/* ✅ Badge for catalog offers */}
+            {isCatalogOffer && (
+              <Chip
+                label="📦 Catalog"
+                size="small"
+                color="info"
+                variant="outlined"
+                icon={<StoreIcon fontSize="small" />}
+              />
+            )}
+          </Box>
         </StyledTableCell>
-        <StyledTableCell align="right">
-          <Typography variant="body2" className="max-w-[120px] truncate" title={getCategoryName(row.category)}>
+
+        {/* ✅ Category Column */}
+        <StyledTableCell align="left">
+          <Typography variant="body2" className="max-w-[150px] truncate" title={getCategoryName(row.category)}>
             {getCategoryName(row.category)}
           </Typography>
         </StyledTableCell>
+
+        {/* ✅ Price Range Column (MRP) */}
         <StyledTableCell align="right">
           <Typography variant="body2" color="text.secondary" className="line-through">
             ₹{priceRange.min?.toFixed(2)} - ₹{priceRange.max?.toFixed(2)}
           </Typography>
         </StyledTableCell>
+
+        {/* ✅ Selling Price Column */}
         <StyledTableCell align="right">
           <Typography variant="body2" fontWeight="bold" color="success.main">
             ₹{priceRange.min?.toFixed(2)} - ₹{priceRange.max?.toFixed(2)}
           </Typography>
         </StyledTableCell>
-        <StyledTableCell align="right">
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-end' }}>
+
+        {/* ✅ Variants Column */}
+        <StyledTableCell align="center">
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'center' }}>
             <Chip
               label={`${Object.keys(variantsByColor).length} color${Object.keys(variantsByColor).length > 1 ? 's' : ''}`}
               size="small"
@@ -165,130 +301,173 @@ function Row({ row, onEdit, onDelete, getCategoryName }: RowProps) {
             </Typography>
           </Box>
         </StyledTableCell>
-        <StyledTableCell align="right">
+
+        {/* ✅ Stock Column */}
+        <StyledTableCell align="center">
           <Chip
-            label={totalStock > 0 ? `In Stock (${totalStock})` : 'Out of Stock'}
+            label={totalStock > 0 ? `${totalStock}` : '0'}
             size="small"
             color={totalStock > 0 ? 'success' : 'error'}
             variant={totalStock > 0 ? 'filled' : 'outlined'}
           />
         </StyledTableCell>
-        <StyledTableCell align="right">
-          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
-            <Tooltip title="Edit Product">
+
+        {/* ✅ Actions Column */}
+        <StyledTableCell align="center">
+          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+            <Tooltip title={isCatalogOffer ? "Update Offer" : "Edit Product"}>
               <IconButton color='primary' onClick={() => onEdit(row)} size="small">
                 <EditIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Delete Product">
-              <IconButton color='error' onClick={() => row._id && onDelete(row._id)} size="small">
-                <DeleteIcon fontSize="small" />
               </IconButton>
             </Tooltip>
           </Box>
         </StyledTableCell>
       </StyledTableRow>
 
-      {/* ✅ Expanded Row: Show Variants & Sub-Variants Details */}
+      {/* ✅ Expanded Row: Variant & Offer Details */}
       <TableRow>
         <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={9}>
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <Box sx={{ margin: 2, p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
-              <Typography variant="h6" gutterBottom component="div" fontWeight="bold">
-                🎨 Variant Details
-              </Typography>
+            <Box sx={{ margin: 2, p: 3, bgcolor: 'grey.50', borderRadius: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" gutterBottom component="div" fontWeight="bold">
+                  🎨 Variant & Offer Details
+                </Typography>
+                {isCatalogOffer && (
+                  <Chip
+                    label="📦 Shared Catalog Product"
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                  />
+                )}
+              </Box>
 
-              {Object.entries(variantsByColor).map(([color, colorVariants]: [string, ProductVariant[]]) => (
-                <Box key={color} sx={{ mb: 3 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                    <Chip
-                      label={color}
-                      size="small"
-                      sx={{
-                        bgcolor: 'primary.light',
-                        color: 'primary.contrastText',
-                        fontWeight: 600
-                      }}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                      {colorVariants.length} option{colorVariants.length > 1 ? 's' : ''}
-                    </Typography>
+              {Object.entries(variantsByColor).length === 0 ? (
+                <Typography variant="body2" color="text.secondary">No variants available</Typography>
+              ) : (
+                Object.entries(variantsByColor).map(([color, colorVariants]: [string, any[]]) => (
+                  <Box key={color} sx={{ mb: 3 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                      <Chip label={color} size="small" sx={{ bgcolor: 'primary.light', color: 'primary.contrastText', fontWeight: 600 }} />
+                      <Typography variant="body2" color="text.secondary">
+                        {colorVariants.length} option{colorVariants.length > 1 ? 's' : ''}
+                      </Typography>
+                    </Box>
+
+                    {/* ✅✅✅ FIXED: Show Seller Offers PER SUB-VARIANT - minimal change, keeps your working code */}
+                    {open && (
+                      <Box sx={{ mt: 3 }}>
+                        {/* ✅ Loop through EACH sub-variant - but keep YOUR exact inner rendering */}
+                        {colorVariants.map((variant: any, variantIdx: number) => {
+                          const currentSellerId = (() => {
+                            try {
+                              const jwt = localStorage.getItem('jwt');
+                              if (!jwt) return null;
+                              const payload = JSON.parse(atob(jwt.split('.')[1]));
+                              return payload._id || payload.userId || payload.id || payload.sellerId;
+                            } catch { return null; }
+                          })();
+
+                          // ✅ Filter ONLY your active offers
+                          const allOffers = variant.offers || [];
+const yourOffersList = allOffers.filter((offer: any) => {
+  const offerSellerId = offer.seller?._id || offer.seller;
+  return offerSellerId === currentSellerId;
+});
+                          const yourOffer = yourOffersList[0]; // Get your first offer
+
+                          // ✅ Debug log (remove after testing)
+                        console.log(`🔍 [Variant ${variantIdx}]`, {
+  variantId: variant._id,
+  totalOffers: allOffers.length,  // ✅ Updated to new variable name
+  yourOffersCount: yourOffersList.length,
+  currentSellerId,
+  yourOffer
+});
+
+                          return (
+                            <Paper
+                              key={variant._id?.$oid || variant._id || `variant-${variantIdx}`}
+                              sx={{
+                                mb: 1,
+                                p: 1.5,
+                                border: '1px solid',
+                                borderColor: yourOffer ? 'success.main' : 'grey.300',
+                                borderRadius: 1,
+                                bgcolor: yourOffer ? 'success.50' : 'grey.50'
+                              }}
+                            >
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                                {/* Variant Info */}
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+                                  <Typography variant="body2" fontWeight="bold">
+                                    📦 Variant {variantIdx + 1}:
+                                  </Typography>
+                                  <Chip label={variant.specifications?.ram || 'N/A'} size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
+                                  <Chip label={variant.specifications?.storage || 'N/A'} size="small" variant="outlined" sx={{ fontSize: '0.7rem' }} />
+                                </Box>
+
+                                {/* Offer Details or Empty State */}
+                                {yourOffer ? (
+                                  <>
+                                    <Box sx={{ textAlign: 'center' }}>
+                                      <Typography variant="caption" color="text.secondary" className="line-through" sx={{ fontSize: '0.7rem' }}>
+                                        MRP: ₹{Number(yourOffer.mrpPrice).toFixed(2)}
+                                      </Typography>
+                                      <Typography variant="body2" fontWeight="bold" color="success.main">
+                                        ₹{Number(yourOffer.sellingPrice).toFixed(2)}
+                                      </Typography>
+                                    </Box>
+
+                                    <Chip
+                                      label={`📦 ${yourOffer.stock || 0}`}
+                                      size="small"
+                                      color={yourOffer.stock > 0 ? 'success' : 'error'}
+                                      variant="outlined"
+                                      sx={{ fontSize: '0.7rem' }}
+                                    />
+
+                                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>
+                                      SKU: {yourOffer.sku || 'N/A'}
+                                    </Typography>
+
+                                    <FormControlLabel
+                                      control={
+                                        <Switch
+                                          checked={yourOffer.isActive !== false}
+                                          onChange={async (e) => {
+                                            const newIsActive = e.target.checked;
+                                            // ✅ Call the parent's handler with proper null checks
+                                            if (row._id && variant._id && yourOffer._id) {
+                                              onStatusToggle(row._id, variant._id, yourOffer._id, newIsActive);
+                                            }
+                                          }}
+                                          color="success"
+                                          size="small"
+                                        />
+                                      }
+                                      label={yourOffer.isActive !== false ? "Active" : "Inactive"}
+                                      labelPlacement="start"
+                                      sx={{ ml: 0, minWidth: '90px' }}
+                                    />
+                                  </>
+                                ) : (
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                    No offer added
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Paper>
+                          );
+                        })}
+                      </Box>
+                    )}
+
+                    {Object.keys(variantsByColor).length > 1 && <Divider sx={{ my: 2 }} />}
                   </Box>
-
-                  <Table size="small" aria-label="variants">
-                    <TableHead>
-                      <TableRow>
-                        <StyledTableCell>Storage/RAM</StyledTableCell>
-                        <StyledTableCell align="right">MRP</StyledTableCell>
-                        <StyledTableCell align="right">Selling Price</StyledTableCell>
-                        <StyledTableCell align="right">Stock</StyledTableCell>
-                        <StyledTableCell align="right">SKU</StyledTableCell>
-                        <StyledTableCell align="right">Status</StyledTableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {colorVariants.map((variant: ProductVariant, idx: number) => (
-                        <TableRow key={variant._id || idx}>
-                          <TableCell component="th" scope="row">
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                              {variant.specifications?.storage && (
-                                <Typography variant="body2" fontWeight="medium">
-                                  📦 {variant.specifications.storage}
-                                </Typography>
-                              )}
-                              {variant.specifications?.ram && (
-                                <Typography variant="body2" color="text.secondary">
-                                  🧠 {variant.specifications.ram}
-                                </Typography>
-                              )}
-                              {!variant.specifications?.storage && !variant.specifications?.ram && (
-                                <Typography variant="body2" color="text.secondary">
-                                  {Object.entries(variant.specifications || {}).map(([key, val]) => (
-                                    <span key={key}>{key}: {val}, </span>
-                                  ))}
-                                </Typography>
-                              )}
-                            </Box>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="body2" color="text.secondary" className="line-through">
-                              ₹{variant.mrpPrice?.toFixed(2) || 'N/A'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="body2" fontWeight="bold" color="success.main">
-                              ₹{variant.sellingPrice?.toFixed(2) || 'N/A'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Chip
-                              label={variant.stock || 0}
-                              size="small"
-                              color={variant.stock > 0 ? 'success' : 'error'}
-                              variant={variant.stock > 0 ? 'filled' : 'outlined'}
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="caption" color="text.secondary">
-                              {variant.sku || 'Auto-generated'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Chip
-                              label={variant.isActive !== false ? 'Active' : 'Inactive'}
-                              size="small"
-                              color={variant.isActive !== false ? 'primary' : 'default'}
-                              variant={variant.isActive !== false ? 'filled' : 'outlined'}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-
-                  {Object.keys(variantsByColor).length > 1 && <Divider sx={{ my: 2 }} />}
-                </Box>
-              ))}
+                ))
+              )}
             </Box>
           </Collapse>
         </TableCell>
@@ -298,7 +477,7 @@ function Row({ row, onEdit, onDelete, getCategoryName }: RowProps) {
 }
 
 // ============================================
-// ✅ MAIN COMPONENT: ProductTable
+// ✅ MAIN COMPONENT: ProductTable with Tabs
 // ============================================
 export default function ProductTable() {
   const sellerProduct = useAppSelector(state => state.sellerProduct);
@@ -306,53 +485,32 @@ export default function ProductTable() {
   const dispatch = useAppDispatch();
   const [editDialogOpen, setEditDialogOpen] = React.useState(false);
   const [editProduct, setEditProduct] = React.useState<Product | null>(null);
-
-  // ✅ NEW: Snackbar state for success/error feedback
   const [snackbarOpen, setSnackbarOpen] = React.useState(false);
   const [snackbarMessage, setSnackbarMessage] = React.useState('');
   const [snackbarSeverity, setSnackbarSeverity] = React.useState<'success' | 'error'>('success');
 
-  // ✅ DEBUG LOG (keep for debugging)
-  React.useEffect(() => {
-    console.log('🔍 [ProductTable] sellerProduct state:', {
-      loading: sellerProduct.loading,
-      error: sellerProduct.error,
-      productsCount: Array.isArray(sellerProduct.products) ? sellerProduct.products.length : 'NOT AN ARRAY',
-      products: sellerProduct.products,
-      productUpdated: sellerProduct.productUpdated,
-    });
-  }, [sellerProduct]);
+  // ✅ NEW: Tab state
+  const [activeTab, setActiveTab] = React.useState(0);
 
-  // ✅ Initial fetch of seller products
+  // ✅ Fetch both independent products AND catalog offers on mount
   React.useEffect(() => {
     const jwt = localStorage.getItem("jwt") || "";
     if (jwt) {
       dispatch(fetchSellerProducts(jwt));
+      dispatch(fetchSellerCatalogOffers(jwt));  // ✅ Fetch catalog offers too
     }
   }, [dispatch]);
 
-  // ✅✅✅ FIXED: Auto-refresh products after successful update AND close dialog
+  // ✅ Handle snackbar for both product types - NO REFETCH NEEDED
   React.useEffect(() => {
-    // ✅ Handle successful update
     if (sellerProduct.productUpdated && !sellerProduct.loading) {
-      console.log('🔄 Product updated - refreshing product list...');
-
-      // ✅ Show success snackbar
       setSnackbarMessage('✅ Product updated successfully!');
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
 
-      // ✅ Re-fetch products to show updated data
-      const jwt = localStorage.getItem("jwt") || "";
-      if (jwt) {
-        dispatch(fetchSellerProducts(jwt));
-      }
-
-      // ✅✅✅ CRITICAL: Reset the productUpdated flag to prevent infinite loop
+      // ✅ Redux already merged the updated product - no refetch needed!
       dispatch(resetUpdateFlag());
-      console.log('✅ Reset productUpdated flag');
 
-      // ✅ Close the edit dialog after a short delay
       if (editDialogOpen) {
         setTimeout(() => {
           setEditDialogOpen(false);
@@ -360,160 +518,193 @@ export default function ProductTable() {
         }, 500);
       }
     }
-
-    // ✅ Handle update error
     if (sellerProduct.error && !sellerProduct.loading) {
       const errorMsg = typeof sellerProduct.error === 'string'
         ? sellerProduct.error
         : (sellerProduct.error as any)?.message || 'Update failed';
-
       setSnackbarMessage(`❌ ${errorMsg}`);
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
-      // ✅ Don't close dialog on error - let user fix issues
     }
   }, [sellerProduct.productUpdated, sellerProduct.error, sellerProduct.loading, dispatch, editDialogOpen]);
-  // ✅ Handle edit button click
+
   const handleEditClick = (product: Product) => {
     setEditProduct(product);
     setEditDialogOpen(true);
   };
 
-  // ✅ Handle dialog close
   const handleEditDialogClose = () => {
     setEditDialogOpen(false);
     setEditProduct(null);
   };
 
-  // ✅ Handle edit form submit
-  const handleEditSubmit = (values: any) => {
-    if (editProduct && editProduct._id) {
-      const jwt = localStorage.getItem("jwt") || "";
-      dispatch(updateProduct({
-        productId: editProduct._id,
-        product: values
-      }));
-      // ✅ REMOVED: Don't close dialog here - let the useEffect handle it after successful update
-    }
-  };
-
-  // ✅ Handle delete button click
   const handleDeleteClick = (productId: string) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
       dispatch(deleteProduct(productId));
     }
   };
 
-  // ✅ Helper: Get category name from _id
   const getCategoryName = (categoryId: string | { _id: string; name?: string } | undefined): string => {
     if (!categoryId) return 'N/A';
     const id = typeof categoryId === 'string' ? categoryId : categoryId._id;
-    const category = categoryState.categories?.find((cat: any) => cat._id === id);
+    const category = categoryState.categories?.find((cat: Category) => cat._id === id);
     return category?.name || 'Unknown';
   };
 
-  // ✅ Transform backend flattened variants to nested form structure
-  const transformProductToFormValues = (product: Product): ProductFormValues => {
-    // Get category hierarchy FROM THE PRODUCT (not from form state)
-    const category = typeof product.category === 'string'
-      ? categoryState.categories?.find((cat: any) => cat._id === product.category)
-      : product.category;
+const handleToggleOfferStatus = async (
+  productId: string, 
+  variantId: string, 
+  offerId: string, 
+  newIsActive: boolean
+) => {
+  try {
+    // ✅ Find the current offer data from Redux state to include required fields
+    const product = sellerProduct.products.find(p => p._id === productId);
+    const variant = product?.variants?.find((v: any) => v._id === variantId);
+    const currentOffer = variant?.offers?.find((o: any) => o._id === offerId);
+    
+    if (!currentOffer) {
+      throw new Error('Offer not found');
+    }
+    
+    // ✅ Safely extract seller ID (handles both string and populated object)
+    const sellerId = typeof currentOffer.seller === 'string' 
+      ? currentOffer.seller 
+      : currentOffer.seller?._id || currentOffer.seller?.id;
+    
+    // ✅ Send minimal valid payload with all required fields
+    await dispatch(updateProduct({
+      productId,
+      product: {
+        variants: [{
+          _id: variantId,
+          color: variant?.color || '',  // ✅ Required by validator
+          images: variant?.images || [],  // ✅ Required by validator
+          offers: [{
+            _id: offerId,
+            seller: sellerId,  // ✅ Use extracted sellerId (always a string)
+            mrpPrice: currentOffer.mrpPrice || 0,  // ✅ Required
+            sellingPrice: currentOffer.sellingPrice || 0,  // ✅ Required
+            stock: currentOffer.stock || 0,  // ✅ Required (optional but safe)
+            isActive: newIsActive  // ✅ The field we're actually updating
+          }]
+        }]
+      }
+    } as any)).unwrap();
+    
+    setSnackbarMessage(`✅ Offer ${newIsActive ? 'activated' : 'deactivated'} successfully!`);
+    setSnackbarSeverity('success');
+    setSnackbarOpen(true);
+  } catch (error) {
+    console.error("❌ Failed to toggle offer status:", error);
+    setSnackbarMessage('❌ Failed to update status');
+    setSnackbarSeverity('error');
+    setSnackbarOpen(true);
+  }
+};
 
-    const level3Cat = category;
-    const level2Cat = level3Cat?.parentCategory
-      ? categoryState.categories?.find((cat: any) => cat._id === level3Cat.parentCategory)
-      : undefined;
-    const level1Cat = level2Cat?.parentCategory
-      ? categoryState.categories?.find((cat: any) => cat._id === level2Cat.parentCategory)
-      : undefined;
-
-    // ✅ Group backend variants by color to create nested structure
-    const variantsByColor = (product.variants || []).reduce((acc: Record<string, ProductVariant[]>, variant: ProductVariant) => {
-      const color = variant.color || 'Unknown';
-      if (!acc[color]) acc[color] = [];
-      acc[color].push(variant);
-      return acc;
-    }, {});
-
-    // ✅ Transform to nested ProductVariantForm structure
-    const formVariants: ProductVariantForm[] = Object.entries(variantsByColor).map(([color, colorVariants]: [string, ProductVariant[]]) => {
-      // ✅ Get images from FIRST variant of this color (shared by ALL sub-variants of this color)
-      const colorImages = colorVariants[0]?.images || [];
-
-      // ✅ Create sub-variants WITHOUT images field (images are at COLOR level now)
-      const subVariants: ProductSubVariantForm[] = colorVariants.map((v: ProductVariant) => ({
-        _id: v._id,
-        specifications: v.specifications || {},
-        // ✅ FIX: Properly handle number → string conversion
-        mrpPrice: typeof v.mrpPrice === 'number' ? String(v.mrpPrice) : '',
-        sellingPrice: typeof v.sellingPrice === 'number' ? String(v.sellingPrice) : '',
-        stock: typeof v.stock === 'number' ? String(v.stock) : '0',
-        sku: v.sku,
-        isActive: v.isActive,
-      }));
-
-      return {
-        color,
-        images: colorImages,  // ✅ Images at COLOR level (shared by all sub-variants)
-        subVariants,
-        isActive: colorVariants[0]?.isActive,
-      };
-    });
-
-    return {
-      _id: product._id,
-      title: product.title,
-      description: product.description,
-
-      // ✅ Category fields: Use product's original categories (READ-ONLY in edit mode)
-      category: level1Cat?._id || "",
-      category2: level2Cat?._id || "",
-      category3: level3Cat?._id || "",
-
-      // ✅ Product-level images (if any) - separate from variant images
-      images: product.images || [],
-
-      // ✅ Product-level specifications (if any)
-      specifications: product.specifications || {},
-
-      // ✅ Nested variants structure for form (color → sub-variants)
-      variants: formVariants,
-
-      brand: product.brand,
-      isActive: product.isActive,
-    };
+  // ✅ Separate products by type
+  const getCurrentSellerId = () => {
+    try {
+      const jwt = localStorage.getItem('jwt');
+      if (!jwt) return null;
+      const payload = JSON.parse(atob(jwt.split('.')[1]));
+      return payload._id || payload.userId || payload.id || payload.sellerId;
+    } catch {
+      return null;
+    }
   };
 
-  // ✅ Safe products array getter
-  const products = Array.isArray(sellerProduct.products) ? sellerProduct.products : [];
+  const currentSellerId = getCurrentSellerId();
+  const allProducts = Array.isArray(sellerProduct.products) ? sellerProduct.products : [];
 
-  // ✅ Handle snackbar close
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
+  // ✅✅✅ FIXED: Filter by seller's offers in variants[].offers[], not by catalog field
+  // ✅✅✅ CORRECTED: Separate by ownership, not catalog field
+  const myProducts = allProducts.filter((p: Product) => {
+    // ✅ My Products: I am the OWNER (I created this product)
+    const isOwner = p.seller === currentSellerId || p.seller?._id === currentSellerId;
+    return isOwner;
+  });
+
+  const catalogOffers = allProducts.filter((p: Product) => {
+    // ✅ Catalog Offers: I added offers to OTHER SELLERS' products
+    const isOwner = p.seller === currentSellerId || p.seller?._id === currentSellerId;
+    const hasMyOffers = p.variants?.some((v: any) =>
+      v.offers?.some((o: any) => {
+        const offerSellerId = o.seller?._id || o.seller;
+        return offerSellerId === currentSellerId && o.isActive !== false;
+      })
+    );
+
+    // ✅ Show in catalog offers if: NOT owner BUT has my offers
+    return !isOwner && hasMyOffers;
+  });
+
+  const handleSnackbarClose = () => setSnackbarOpen(false);
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue);
   };
 
   return (
     <>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h4" fontWeight="bold">Products</Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => window.location.href = '/seller/add-product'}
-          startIcon={<AddPhotoAlternateIcon />}
-        >
-          Add New Product
-        </Button>
+      {/* ✅ Header with Tabs */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+        <Box>
+          <Typography variant="h4" fontWeight="bold">Products</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Manage your independent products and catalog offers
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <Tabs
+            value={activeTab}
+            onChange={handleTabChange}
+            variant="fullWidth"
+            sx={{ minWidth: 400 }}
+          >
+            <Tab
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" fontWeight={activeTab === 0 ? 'bold' : 'normal'}>
+                    🛍️ My Products
+                  </Typography>
+                  <Chip label={myProducts.length} size="small" color="primary" variant="outlined" />
+                </Box>
+              }
+              id="products-tab-0"
+              aria-controls="products-tabpanel-0"
+            />
+            <Tab
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" fontWeight={activeTab === 1 ? 'bold' : 'normal'}>
+                    📦 Catalog Offers
+                  </Typography>
+                  <Chip label={catalogOffers.length} size="small" color="info" variant="outlined" />
+                </Box>
+              }
+              id="products-tab-1"
+              aria-controls="products-tabpanel-1"
+            />
+          </Tabs>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => window.location.href = '/seller/add-product'}
+            startIcon={<AddPhotoAlternateIcon />}
+          >
+            Add New
+          </Button>
+        </Box>
       </Box>
 
-      {/* ✅ Loading State */}
       {sellerProduct.loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}>
           <CircularProgress />
         </Box>
       )}
 
-      {/* ✅ Error State */}
       {sellerProduct.error && !sellerProduct.loading && (
         <Alert severity="error" sx={{ mb: 2 }}>
           Error: {
@@ -533,7 +724,10 @@ export default function ProductTable() {
             sx={{ ml: 2 }}
             onClick={() => {
               const jwt = localStorage.getItem("jwt") || "";
-              if (jwt) dispatch(fetchSellerProducts(jwt));
+              if (jwt) {
+                dispatch(fetchSellerProducts(jwt));
+                dispatch(fetchSellerCatalogOffers(jwt));
+              }
             }}
           >
             Retry
@@ -541,7 +735,6 @@ export default function ProductTable() {
         </Alert>
       )}
 
-      {/* ✅ Success Snackbar (for update feedback) */}
       <Snackbar
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
         open={snackbarOpen}
@@ -558,59 +751,115 @@ export default function ProductTable() {
         </Alert>
       </Snackbar>
 
-      {/* ✅ Products Table */}
+      {/* ✅ Tab Panels */}
       {!sellerProduct.loading && !sellerProduct.error && (
-        <TableContainer component={Paper} sx={{ borderRadius: 2, boxShadow: 2 }}>
-          <Table sx={{ minWidth: 700 }} aria-label="customized table">
-            <TableHead>
-              <TableRow>
-                <StyledTableCell />
-                <StyledTableCell>Images</StyledTableCell>
-                <StyledTableCell align="right">Title</StyledTableCell>
-                <StyledTableCell align="right">Category</StyledTableCell>
-                <StyledTableCell align="right">Price Range</StyledTableCell>
-                <StyledTableCell align="right">Selling Price</StyledTableCell>
-                <StyledTableCell align="right">Variants</StyledTableCell>
-                <StyledTableCell align="right">Stock</StyledTableCell>
-                <StyledTableCell align="right">Actions</StyledTableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {products.length === 0 ? (
-                <StyledTableRow>
-                  <StyledTableCell colSpan={9} align="center">
-                    <Box sx={{ py: 10, textAlign: 'center' }}>
-                      <Typography variant="h6" color="text.secondary" gutterBottom>
-                        No products found
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                        Get started by adding your first product
-                      </Typography>
-                      <Button
-                        variant="contained"
-                        color="primary"
-                        onClick={() => window.location.href = '/seller/add-product'}
-                        startIcon={<AddPhotoAlternateIcon />}
-                      >
-                        Add Your First Product
-                      </Button>
-                    </Box>
-                  </StyledTableCell>
-                </StyledTableRow>
-              ) : (
-                products.map((item: Product) => (
-                  <Row
-                    key={item._id}  // ✅ Use unique product _id as key
-                    row={item}
-                    onEdit={handleEditClick}
-                    onDelete={handleDeleteClick}
-                    getCategoryName={getCategoryName}
-                  />
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <>
+          {/* Tab 0: Independent Products */}
+          <TabPanel value={activeTab} index={0}>
+            {myProducts.length === 0 ? (
+              <Paper sx={{ p: 5, textAlign: 'center', bgcolor: 'grey.50' }}>
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  No products found
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Create your first product to start selling
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => window.location.href = '/seller/add-product'}
+                  startIcon={<AddPhotoAlternateIcon />}
+                >
+                  Create Product
+                </Button>
+              </Paper>
+            ) : (
+              <TableContainer component={Paper} sx={{ borderRadius: 2, boxShadow: 2 }}>
+                <Table sx={{ minWidth: 1000 }} aria-label="my products table">
+                  <TableHead>
+                    <TableRow>
+                      <StyledTableCell />
+                      <StyledTableCell>Images</StyledTableCell>
+                      <StyledTableCell align="left">Title</StyledTableCell>
+                      <StyledTableCell align="left">Category</StyledTableCell>
+                      <StyledTableCell align="right">Price Range</StyledTableCell>
+                      <StyledTableCell align="right">Selling Price</StyledTableCell>
+                      <StyledTableCell align="center">Variants</StyledTableCell>
+                      <StyledTableCell align="center">Stock</StyledTableCell>
+                      <StyledTableCell align="center">Actions</StyledTableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {myProducts.map((item: Product) => (
+                      <Row
+                        key={item._id}
+                        row={item}
+                        onEdit={handleEditClick}
+                        onDelete={handleDeleteClick}
+                        getCategoryName={getCategoryName}
+                        isCatalogOffer={false}
+                        onStatusToggle={handleToggleOfferStatus}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </TabPanel>
+
+          {/* Tab 1: Catalog Offers */}
+          <TabPanel value={activeTab} index={1}>
+            {catalogOffers.length === 0 ? (
+              <Paper sx={{ p: 5, textAlign: 'center', bgcolor: 'grey.50' }}>
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  No catalog offers found
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  List your offer on existing catalog products to start selling
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => window.location.href = '/seller/add-product'}
+                  startIcon={<StoreIcon />}
+                >
+                  List Catalog Offer
+                </Button>
+              </Paper>
+            ) : (
+              <TableContainer component={Paper} sx={{ borderRadius: 2, boxShadow: 2 }}>
+                <Table sx={{ minWidth: 1000 }} aria-label="catalog offers table">
+                  <TableHead>
+                    <TableRow>
+                      <StyledTableCell />
+                      <StyledTableCell>Images</StyledTableCell>
+                      <StyledTableCell align="left">Title</StyledTableCell>
+                      <StyledTableCell align="left">Category</StyledTableCell>
+                      <StyledTableCell align="right">Price Range</StyledTableCell>
+                      <StyledTableCell align="right">Selling Price</StyledTableCell>
+                      <StyledTableCell align="center">Variants</StyledTableCell>
+                      <StyledTableCell align="center">Stock</StyledTableCell>
+                      <StyledTableCell align="center">Actions</StyledTableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {catalogOffers.map((item: Product) => (
+                      <Row
+                        key={item._id}
+                        row={item}
+                        onEdit={handleEditClick}
+                        onDelete={handleDeleteClick}
+                        getCategoryName={getCategoryName}
+                        isCatalogOffer={true}
+                        onStatusToggle={handleToggleOfferStatus}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </TabPanel>
+        </>
       )}
 
       {/* ✅ Edit Dialog */}
@@ -623,7 +872,7 @@ export default function ProductTable() {
       >
         {editProduct && (
           <UpdateProductForm
-            initialValues={transformProductToFormValues(editProduct)}
+            initialValues={editProduct as any}
             onClose={handleEditDialogClose}
           />
         )}
