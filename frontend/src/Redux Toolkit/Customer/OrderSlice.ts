@@ -57,34 +57,82 @@ export const fetchOrderById = createAsyncThunk<
 
 // Create a new order
 export const createOrder = createAsyncThunk<
-  any,
+  // ✅ Return type: union of possible responses
+  { payment_link_url?: string } | { 
+    type: 'RAZORPAY_ORDER'; 
+    razorpayOrder: any; 
+    paymentOrderId: string;
+    fulfillmentType: string;
+    pickupTime?: string | null;
+  } | { success: boolean; orders: string[] },
+  // ✅ Input type: ADD finalAmount? here 👇
   {
     address?: Address;
     fulfillmentType: 'DELIVERY' | 'SELF_PICKUP';
     pickupTime?: string;
-    jwt: string; paymentGateway: string
+    jwt: string;
+    paymentGateway: string;
+    finalAmount?: number;  // ✅ ADD THIS LINE - allows frontend to send calculated total
   }
 >(
-  "orders/createOrder",
-  async ({ address, fulfillmentType,pickupTime, jwt, paymentGateway }, { rejectWithValue }) => {
+  "order/createOrder",
+  async (
+    { 
+      address, 
+      fulfillmentType, 
+      pickupTime, 
+      jwt, 
+      paymentGateway,
+      finalAmount  // ✅ Extract finalAmount from params
+    }, 
+    { rejectWithValue }
+  ) => {
     try {
-      const response = await api.post<any>(
-        API_URL,
+      const response = await api.post(
+        `/api/orders?paymentMethod=${paymentGateway}`,
         {
           shippingAddress: address,
           fulfillmentType,
-          pickupTime
+          pickupTime,
+          finalAmount  // ✅ Send finalAmount to backend (includes shipping, fees, discount)
         },
         {
-          headers: { Authorization: `Bearer ${jwt}` },
-          params: { paymentMethod: paymentGateway },
+          headers: {
+            Authorization: `Bearer ${jwt}`,
+          },
         }
       );
-      console.log("order created ", response.data);
+
+      // ✅ Handle both response formats:
+      
+      // Format 1: Razorpay Modal (NEW)
+      if (response.data.type === 'RAZORPAY_ORDER') {
+        return {
+          type: 'RAZORPAY_ORDER',
+          razorpayOrder: response.data.razorpayOrder,
+          paymentOrderId: response.data.paymentOrderId,
+          fulfillmentType: response.data.fulfillmentType,
+          pickupTime: response.data.pickupTime
+        };
+      }
+      
+      // Format 2: Payment Link (OLD - fallback)
+      if (response.data.payment_link_url) {
+        return { payment_link_url: response.data.payment_link_url };
+      }
+      
+      // Format 3: COD - orders created immediately
+      if (response.data.success && response.data.orders) {
+        return response.data;
+      }
+      
+      // Default: return full response
       return response.data;
+      
     } catch (error: any) {
-      console.log("error ", error.response);
-      return rejectWithValue(error.response?.data?.error || "Failed to create order");
+      return rejectWithValue(
+        error.response?.data?.message || "Failed to create order"
+      );
     }
   }
 );

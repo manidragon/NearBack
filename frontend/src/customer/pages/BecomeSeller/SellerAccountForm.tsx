@@ -1,4 +1,4 @@
-// SellerAccountForm.tsx
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\BecomeSeller\SellerAccountForm.tsx
 import { Button, CircularProgress, Step, StepLabel, Stepper } from "@mui/material";
 import { useFormik } from "formik";
 import { useState, useEffect } from "react";
@@ -164,16 +164,42 @@ const SellerAccountForm = () => {
     setShowOtpSection(true);
   };
 
-  const handleVerifyAndCreate = () => {
-    if (otp.length !== 6 || sellerAuth.loading) return;
+const handleVerifyAndCreate = () => {
+  if (otp.length !== 6 || sellerAuth.loading) return;
 
-    const payload = {
-      ...formik.values,
-      otp,
-    };
-
-    dispatch(createSeller({ sellerData: payload, navigate: null }));
+  // ✅ Build payload from form values (type-safe)
+  const payload: any = {
+    ...formik.values,
+    otp,
   };
+
+  // ✅ SAFEGUARD: Remove invalid location if it somehow exists
+  // This handles cases where location might be added by Redux/axios defaults
+  if (payload.location) {
+    const loc = payload.location;
+    // If location has no valid coordinates, remove it entirely
+    const hasValidCoords = 
+      loc?.coordinates?.lat && 
+      loc?.coordinates?.lng && 
+      typeof loc.coordinates.lat === 'number' && 
+      typeof loc.coordinates.lng === 'number' &&
+      !isNaN(loc.coordinates.lat) && 
+      !isNaN(loc.coordinates.lng);
+    
+    if (!hasValidCoords) {
+      delete payload.location;
+    }
+  }
+
+  // ✅ DEBUG: Log final payload (optional, remove in production)
+  console.log('🔍 [DEBUG] Sending payload:', {
+    email: payload.email,
+    hasLocation: !!payload.location,
+    location: payload.location
+  });
+
+  dispatch(createSeller({ sellerData: payload, navigate: null }));
+};
 
   return (
     <div>

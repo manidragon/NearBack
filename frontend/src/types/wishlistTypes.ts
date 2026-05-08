@@ -16,6 +16,6 @@ export interface WishlistState {
 
 // Payload interfaces for async thunks
 export interface AddProductToWishlistPayload {
-  wishlistId: number;
-  productId: number;
+  wishlistId: string;
+  productId: string;
 }

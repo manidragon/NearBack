@@ -69,8 +69,6 @@ class SellerController {
   }
 }
 
-
-
   async getSellerById(req, res) {
     try {
       const seller = await SellerService.getSellerById(req.params.id);

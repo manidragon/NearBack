@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\seller\pages\Payment\Payment.tsx
 import { Button, Card, Divider } from '@mui/material'
 import  { useState } from 'react'
 import TransactionTable from './TransactionTable';

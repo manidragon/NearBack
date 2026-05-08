@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Account\UserAddressCard.tsx
 import type { Address } from '../../../types/addressTypes'
 
 const UserAddressCard = ({item, onEdit, onDelete}:{item: Address, onEdit: (address: Address) => void, onDelete: (addressId: string) => void}) => {

@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Cart\Cart.tsx
 import {
   Alert,
   Button,
@@ -25,8 +26,12 @@ const Cart = () => {
   const cart = useAppSelector((store) => store.cart);
   const auth = useAppSelector((store) => store.auth);
 
-  // ⚠️ Make sure this name matches your store (coupone or coupon)
-  const coupone = useAppSelector((store) => store.coupon);
+  // ✅ FIX 1: Safe selector with fallback for coupon slice
+  const couponState = useAppSelector((store) => store.coupon) || {
+    couponApplied: false,
+    error: null,
+    message: null
+  };
 
   const [couponCode, setCouponCode] = useState("");
   const [snackbarOpen, setOpenSnackbar] = useState(false);
@@ -37,7 +42,7 @@ const Cart = () => {
     if (jwt) {
       dispatch(fetchUserCart(jwt));
     }
-  }, [dispatch]);
+  }, [auth.jwt, dispatch]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCouponCode(e.target.value);
@@ -61,18 +66,26 @@ const Cart = () => {
     setOpenSnackbar(false);
   };
 
-  // Snackbar trigger
+  // ✅ FIX 2: Safe useEffect with optional chaining
   useEffect(() => {
-    if (coupone?.couponApplied || coupone?.error) {
+    // ✅ Use optional chaining + nullish coalescing
+    if (couponState?.couponApplied || couponState?.error) {
       setOpenSnackbar(true);
-      if (coupone?.couponApplied) {
+      if (couponState?.couponApplied) {
         setCouponCode("");
       }
     }
-  }, [coupone?.couponApplied, coupone?.error]);
+  }, [couponState?.couponApplied, couponState?.error]); // ✅ Safe deps
 
-  // Safe fallback
+  // ✅ FIX 3: Safe cart items fallback
   const cartItems = cart?.cart?.cartItems || [];
+  
+  console.log('🔍 Cart items debug:', cartItems.map(item => ({
+  _id: item._id,
+  title: item.product?.title,
+  hasId: !!item._id,
+  type: typeof item._id
+})));
 
   return (
     <>
@@ -82,10 +95,16 @@ const Cart = () => {
 
             {/* Cart Items */}
             <div className="lg:col-span-2 space-y-3">
-              {cartItems.map((item: CartItem) => (
-                <CartItemCard key={item._id} item={item} />
-              ))}
-            </div>
+            {/* ✅ FIX: Use fallback key if _id is missing */}
+            {cartItems.map((item: CartItem, index: number) => {
+              // ✅ Generate unique key: prefer _id, fallback to index + productId
+              const uniqueKey = item._id 
+                ? String(item._id) 
+                : `cart-item-${index}-${item.product?._id || 'unknown'}`;
+              
+              return <CartItemCard key={uniqueKey} item={item} />;
+            })}
+          </div>
 
             {/* Right Section */}
             <div className="col-span-1 text-sm space-y-3">
@@ -97,7 +116,8 @@ const Cart = () => {
                   <span>Apply Coupons</span>
                 </div>
 
-                {!cart?.cart?.couponCode ? (
+                {/* ✅ FIX 4: Safe coupon code check */}
+                {!cart.cart?.couponCode ? (
                   <div className="flex justify-between items-center">
                     <TextField
                       value={couponCode}
@@ -142,7 +162,6 @@ const Cart = () => {
                   </Button>
                 </div>
               </section>
-
             </div>
           </div>
         </div>
@@ -158,7 +177,7 @@ const Cart = () => {
         </div>
       )}
 
-      {/* Snackbar */}
+      {/* ✅ FIX 5: Safe snackbar with optional chaining */}
       <Snackbar
         anchorOrigin={{ vertical: "top", horizontal: "right" }}
         open={snackbarOpen}
@@ -167,13 +186,11 @@ const Cart = () => {
       >
         <Alert
           onClose={handleCloseSnackbar}
-          severity={coupone?.error ? "error" : "success"}
+          severity={couponState?.error ? "error" : "success"}
           variant="filled"
           sx={{ width: "100%" }}
         >
-          {coupone?.error
-            ? coupone.error
-            : "Coupon applied successfully"}
+          {couponState?.error || "Coupon applied successfully"}
         </Alert>
       </Snackbar>
     </>

@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\backend\src\controllers\orderController.js
 const OrderService = require("../services/OrderService");
 const CartService = require("../services/CartService");
 const UserService = require("../services/UserService");
@@ -8,164 +9,216 @@ const PaymentOrder = require("../models/PaymentOrder");
 const Address = require("../models/Address");
 const Cart = require("../models/Cart");
 const CartItem = require("../models/CartItem");
+const razorpay = require("../config/razorpayClient");
 
 class OrderController {
-  // Create a payment session (NOT actual orders)
-  // Create a payment session OR place order directly (for COD/Self Pickup)
  async createOrder(req, res, next) {
-  const { shippingAddress, fulfillmentType = 'DELIVERY', pickupTime } = req.body; // 👈 Extract pickupTime
+  // ✅ Extract finalAmount from frontend (includes shipping, fees, discount)
+  const { shippingAddress, fulfillmentType = 'DELIVERY', pickupTime, finalAmount } = req.body;
   const { paymentMethod } = req.query;
 
-  try {
-    const user = await req.user;
+    try {
+      const user = await req.user;
 
-    // ✅ FETCH CART EARLY — needed for both COD and online payments
-    const cart = await CartService.findUserCart(user);
-    if (!cart || !cart.cartItems || cart.cartItems.length === 0) {
-      return res.status(400).json({ message: "Cannot place order: cart is empty" });
-    }
-
-
-    // 🔹 Handle Self Pickup: no user shipping address needed
-    let addressDoc = null;
-    if (fulfillmentType === 'SELF_PICKUP') {
-      // We'll use seller's pickup address during order creation
-      // So no need to validate or create user address here
-    } else {
-      // 🔹 Regular delivery: validate/create shipping address
-      if (shippingAddress._id) {
-        const userHasAddress = user.addresses.some(addr => {
-          const addrId = typeof addr === 'object' ? addr._id : addr;
-          return addrId.toString() === shippingAddress._id.toString();
-        });
-
-        if (!userHasAddress) {
-          throw new OrderError("Invalid shipping address: not associated with user");
-        }
-
-        addressDoc = await Address.findById(shippingAddress._id);
-        if (!addressDoc) {
-          throw new OrderError("Shipping address not found");
-        }
-      } else {
-        addressDoc = await Address.create(shippingAddress);
+      // ✅ FETCH CART EARLY — needed for both COD and online payments
+      const cart = await CartService.findUserCart(user);
+      if (!cart || !cart.cartItems || cart.cartItems.length === 0) {
+        return res.status(400).json({ message: "Cannot place order: cart is empty" });
       }
-    }
 
 
+      // 🔹 Handle Self Pickup: no user shipping address needed
+      let addressDoc = null;
+      if (fulfillmentType === 'SELF_PICKUP') {
+        // We'll use seller's pickup address during order creation
+        // So no need to validate or create user address here
+      } else {
+        // 🔹 Regular delivery: validate/create shipping address
+        if (shippingAddress._id) {
+          const userHasAddress = user.addresses.some(addr => {
+            const addrId = typeof addr === 'object' ? addr._id : addr;
+            return addrId.toString() === shippingAddress._id.toString();
+          });
 
-    const totalAmount = cart.totalSellingPrice;
+          if (!userHasAddress) {
+            throw new OrderError("Invalid shipping address: not associated with user");
+          }
 
-    console.log("Creating order for user:", user._id);
-    console.log("Fulfillment type:", fulfillmentType);
-    console.log("Payment method:", paymentMethod);
-    console.log("Pickup time:", pickupTime); // 👈 Log pickupTime
+          addressDoc = await Address.findById(shippingAddress._id);
+          if (!addressDoc) {
+            throw new OrderError("Shipping address not found");
+          }
+        } else {
+          addressDoc = await Address.create(shippingAddress);
+        }
+      }
 
-    // ✅ CASE 1: Cash on Delivery (with or without self-pickup)
-    if (paymentMethod === 'CASH_ON_DELIVERY') {
-      // Create actual orders immediately — no payment session
-      const orders = await OrderService.createOrder(
-        user,
-        addressDoc,           // null if self-pickup
-        cart,
-        fulfillmentType,      // 👈 Pass fulfillment type
-        pickupTime            // 👈 Pass pickupTime
-      );
+const subtotal = cart.totalSellingPrice;
+const shippingCost = 0; // Your shipping logic
+const platformFee = 7; // Your platform fee logic
+const discount = cart.couponPrice || 0;
 
-      // ✅ FIX: Clear cart items AND cart using cart._id
-      try {
-        console.log('🔍 Clearing cart with ID:', cart._id);
-        
-        // Step 1: Delete all cart item documents from database
-        const deletedItems = await CartItem.deleteMany({ cart: cart._id });
-        console.log(`🗑️ Deleted ${deletedItems.deletedCount} cart items`);
-        
-        // Step 2: Clear the cart document
-        const cartClearResult = await Cart.findByIdAndUpdate(
-          cart._id,  // 👈 Use cart ID instead of querying by user
-          { 
-            cartItems: [], 
-            totalSellingPrice: 0, 
-            totalItem: 0, 
-            totalMrpPrice: 0, 
-            discount: 0,
-            couponCode: null,
-            couponPrice: 0
-          },
-          { new: true }
+// ✅ Use finalAmount from frontend if provided (trusted after validation), else calculate here
+const totalAmount = finalAmount !== undefined && finalAmount > 0 
+  ? finalAmount 
+  : subtotal + shippingCost + platformFee - discount;
+
+console.log("💰 Final Amount Calculation:", {
+  subtotal,
+  shipping: shippingCost,
+  platformFee,
+  discount,
+  finalAmountFromFrontend: finalAmount,
+  usedAmount: totalAmount
+});
+
+console.log("Creating order for user:", user._id);
+console.log("Fulfillment type:", fulfillmentType);
+console.log("Payment method:", paymentMethod);
+console.log("Pickup time:", pickupTime);
+  
+
+      // ✅ CASE 1: Cash on Delivery (with or without self-pickup)
+      if (paymentMethod === 'CASH_ON_DELIVERY') {
+        // Create actual orders immediately — no payment session
+        const orders = await OrderService.createOrder(
+          user,
+          addressDoc,           // null if self-pickup
+          cart,
+          fulfillmentType,      // 👈 Pass fulfillment type
+          pickupTime            // 👈 Pass pickupTime
         );
 
-        console.log('✅ Cart clear result:', cartClearResult);
-        
-        if (!cartClearResult) {
-          console.error('❌ Cart clearing FAILED - cart not found');
-        } else {
-          console.log('✅ Cart cleared successfully!');
-          console.log('   Cart ID:', cartClearResult._id);
-          console.log('   Items:', cartClearResult.cartItems.length);
-          console.log('   Total:', cartClearResult.totalSellingPrice);
+        // ✅ FIX: Clear cart items AND cart using cart._id
+        try {
+          console.log('🔍 Clearing cart with ID:', cart._id);
+
+          // Step 1: Delete all cart item documents from database
+          const deletedItems = await CartItem.deleteMany({ cart: cart._id });
+          console.log(`🗑️ Deleted ${deletedItems.deletedCount} cart items`);
+
+          // Step 2: Clear the cart document
+          const cartClearResult = await Cart.findByIdAndUpdate(
+            cart._id,  // 👈 Use cart ID instead of querying by user
+            {
+              cartItems: [],
+              totalSellingPrice: 0,
+              totalItem: 0,
+              totalMrpPrice: 0,
+              discount: 0,
+              couponCode: null,
+              couponPrice: 0
+            },
+            { new: true }
+          );
+
+          console.log('✅ Cart clear result:', cartClearResult);
+
+          if (!cartClearResult) {
+            console.error('❌ Cart clearing FAILED - cart not found');
+          } else {
+            console.log('✅ Cart cleared successfully!');
+            console.log('   Cart ID:', cartClearResult._id);
+            console.log('   Items:', cartClearResult.cartItems.length);
+            console.log('   Total:', cartClearResult.totalSellingPrice);
+          }
+        } catch (clearError) {
+          console.error('❌ Cart clearing error:', clearError);
+          console.error('❌ Error stack:', clearError.stack);
         }
-      } catch (clearError) {
-        console.error('❌ Cart clearing error:', clearError);
-        console.error('❌ Error stack:', clearError.stack);
+
+        return res.status(200).json({
+          success: true,
+          message: "Order placed successfully",
+          orders: orders.map(o => o._id)
+        });
       }
 
-      return res.status(200).json({
-        success: true,
-        message: "Order placed successfully",
-        orders: orders.map(o => o._id)
+      // ✅ CASE 2: Online Payment (Razorpay/Stripe) → create payment session
+      // Note: Self Pickup with online payment is allowed (e.g., pay online, pick up in store)
+
+      const paymentOrder = new PaymentOrder({
+        user: user._id,
+        amount: totalAmount,
+        paymentMethod: "RAZORPAY",  // ✅ Hardcoded string
+        shippingAddress: addressDoc?._id || null,
+        pickupTime: pickupTime || null,
+        status: "PENDING"
       });
-    }
 
-    // ✅ CASE 2: Online Payment (Razorpay/Stripe) → create payment session
-    // Note: Self Pickup with online payment is allowed (e.g., pay online, pick up in store)
-
-    const paymentOrder = new PaymentOrder({
-      user: user._id,
-      amount: totalAmount,
-      paymentMethod: paymentMethod,
-      shippingAddress: addressDoc?._id || null, // null for self-pickup
-      pickupTime: pickupTime || null, // 👈 Store pickupTime for later use
-      status: "PENDING"
-    });
-
-    await paymentOrder.save();
-
-    const response = {};
-
-    if (paymentMethod === PaymentMethod.RAZORPAY) {
-      const payment = await PaymentService.createRazorpayPaymentLink(
-        user,
-        paymentOrder.amount,
-        paymentOrder._id
-      );
-      response.payment_link_url = payment.short_url;
-      paymentOrder.paymentLinkId = payment.id;
       await paymentOrder.save();
 
-    } else if (paymentMethod === PaymentMethod.STRIPE) {
-      const paymentUrl = await PaymentService.createStripePaymentLink(
-        user,
-        paymentOrder.amount,
-        paymentOrder._id
-      );
-      response.payment_link_url = paymentUrl;
+      // ✅ RAZORPAY ONLY: Create Order for Desktop Modal
+      try {
+        console.log("🔗 Creating Razorpay ORDER for modal (amount: ₹" + totalAmount + ")");
 
-    } else {
-      // This should not happen if frontend sends valid methods
-      await paymentOrder.deleteOne();
-      return res.status(400).json({ message: "Invalid payment method" });
+        // ✅ Create Razorpay Order (for modal popup) - NOT payment link
+        const razorpayOrder = await razorpay.orders.create({
+          amount: totalAmount * 100,  // Convert ₹ to paise
+          currency: 'INR',
+          receipt: `order_${paymentOrder._id}`,
+          notes: {
+            paymentOrderId: paymentOrder._id.toString(),
+            userId: user._id.toString(),
+            fulfillmentType: fulfillmentType
+          }
+        });
+
+        console.log("✅ Razorpay Order created:", razorpayOrder.id);
+
+        // ✅ Return order details for frontend modal (desktop view)
+        const response = {
+          success: true,
+          type: 'RAZORPAY_ORDER',  // ✅ Flag for frontend to open modal
+          razorpayOrder: {
+            order_id: razorpayOrder.id,
+            amount: razorpayOrder.amount,      // in paise
+            currency: razorpayOrder.currency,
+            customer: {
+              name: user.fullName || 'Customer',
+              email: user.email,
+              contact: user.mobile || ''
+            }
+          },
+          paymentOrderId: paymentOrder._id,    // For callback verification
+          fulfillmentType: fulfillmentType,    // Pass to frontend
+          pickupTime: pickupTime               // Pass to frontend
+        };
+
+        // ✅ Save razorpay order ID for reference
+        paymentOrder.paymentLinkId = razorpayOrder.id;
+        await paymentOrder.save();
+
+        return res.status(200).json(response);
+
+      } catch (razorpayError) {
+        console.error("❌ Razorpay order creation failed:", {
+          name: razorpayError.name,
+          message: razorpayError.message,
+          description: razorpayError.description,
+          statusCode: razorpayError.statusCode
+        });
+
+        // Cleanup: Delete the PaymentOrder if Razorpay fails
+        await paymentOrder.deleteOne();
+
+        const errorMsg = razorpayError.description
+          || razorpayError.error?.description
+          || razorpayError.message
+          || 'Unknown Razorpay error';
+
+        return res.status(500).json({
+          message: "Failed to initialize payment: " + errorMsg
+        });
+      }
+
+    } catch (error) {
+      console.error("Order creation error:", error);
+      return res.status(500).json({
+        message: `Failed to process order: ${error.message || 'Unknown error'}`
+      });
     }
-
-    return res.status(200).json(response);
-
-  } catch (error) {
-    console.error("Order creation error:", error);
-    return res.status(500).json({
-      message: `Failed to process order: ${error.message || 'Unknown error'}`
-    });
   }
-}
 
   // Get order by ID
   async getOrderById(req, res, next) {
@@ -255,7 +308,7 @@ class OrderController {
     }
   }
 
-  
+
 }
 
 module.exports = new OrderController();

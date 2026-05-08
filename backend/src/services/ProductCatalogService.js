@@ -126,11 +126,6 @@ class ProductCatalogService {
   // ✅ Get catalog product by ID (from Product model)
   async getCatalogById(catalogId) {
     try {
-      console.log('🔍 [Service] getCatalogById called:', {
-        catalogId,
-        catalogIdType: typeof catalogId,
-        isValidObjectId: mongoose.Types.ObjectId.isValid(catalogId)
-      });
 
       const catalogObjectId = mongoose.Types.ObjectId.isValid(catalogId)
         ? new mongoose.Types.ObjectId(catalogId)
@@ -143,13 +138,6 @@ class ProductCatalogService {
       })
         .populate('category', 'name categoryId level')
         .populate('seller', 'sellerName businessDetails.businessName email mobile');
-
-      console.log('🔍 [Service] Catalog fetch result:', {
-        found: !!catalog,
-        _id: catalog?._id?.toString(),
-        isActive: catalog?.isActive,
-        title: catalog?.title
-      });
 
       if (!catalog) {
         throw new CatalogError(`Catalog product with ID ${catalogId} does not exist or is not a catalog-linked product`);
@@ -205,12 +193,6 @@ class ProductCatalogService {
 
   async listOfferOnCatalog(productId, offerData, sellerId) {
     try {
-      console.log('🔍 [Service] listOfferOnCatalog called:', {
-        productId,
-        sellerId,
-        sellerIdType: typeof sellerId,
-        variantsCount: offerData?.variants?.length
-      });
 
       const mongoose = require('mongoose');
       const Product = require('../models/Product');
@@ -225,12 +207,6 @@ class ProductCatalogService {
         isActive: true
       });
 
-      console.log('🔍 [Service] Product lookup:', {
-        found: !!existingProduct,
-        _id: existingProduct?._id?.toString(),
-        title: existingProduct?.title,
-        totalVariants: existingProduct?.variants?.length
-      });
 
       if (!existingProduct) {
         throw new CatalogError(`Product with ID ${productId} does not exist or is inactive`);
@@ -391,11 +367,6 @@ class ProductCatalogService {
           // ✅✅✅ NEW: Set variantOwner if this is the FIRST offer for this variant
           if (!variantHadOffersBefore && newOffers.length > 0) {
             offerUpdate.$set['variants.$[variant].variantOwner'] = incomingSellerId;
-            console.log('👑 [Service] Set variantOwner:', {
-              variantId: targetVariantId,
-              owner: incomingSellerId,
-              reason: 'First offer added to existing variant'
-            });
           }
 
           // Add offer update operation
@@ -411,14 +382,6 @@ class ProductCatalogService {
         } else {
           console.log('✅ [Service] Skipping separate offer push for new variant (offers already included)');
         }
-
-        console.log('✅ [Service] Prepared offer for variant:', {
-          variantId: targetVariantId,
-          color: inputVariant.color,
-          isNew: isNewVariant,
-          offersCount: newOffers.length,
-          isFirstOffer: !variantHadOffersBefore
-        });
       }
 
       // ✅✅✅ NEW: Add new variants to product (if any)
@@ -516,7 +479,6 @@ class ProductCatalogService {
         });
       }
 
-      console.log('✅ [Service] Offer(s) added successfully');
       return productResponse;
 
     } catch (error) {

@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Seller\transactionSlice.ts
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import {type Transaction } from '../../types/Transaction';
 import { api } from '../../Config/Api';

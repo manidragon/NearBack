@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Checkout\AddressPage.tsx
 import React, { useState, useEffect } from 'react';
 import PricingCard from '../Cart/PricingCard';
 import { Box, Button, FormControlLabel, Modal, Radio, RadioGroup, Alert, Snackbar, CircularProgress, Typography, TextField } from '@mui/material';
@@ -11,12 +12,14 @@ import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
 import { selectCart } from '../../../Redux Toolkit/Customer/CartSlice';
 import { createOrder } from '../../../Redux Toolkit/Customer/OrderSlice';
+import { clearCartAfterOrder } from '../../../Redux Toolkit/Customer/CartSlice';
 import { useNavigate } from 'react-router-dom';
 import type { Address } from '../../../types/addressTypes';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import dayjs, { Dayjs } from 'dayjs';
+import axios from 'axios';
 
 const style = {
     position: 'absolute',
@@ -32,7 +35,7 @@ const style = {
 const paymentGatewayList = [
     {
         value: "RAZORPAY",
-        image: "https://razorpay.com/newsroom-content/uploads/2020/12/output-onlinepngtools-1-1.png  ",
+        image: "https://razorpay.com/newsroom-content/uploads/2020/12/output-onlinepngtools-1-1.png",
         label: "Razorpay",
         icon: null
     },
@@ -52,8 +55,13 @@ const fulfillmentOptions = [
 const AddressPage = () => {
     const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
     const [fulfillmentType, setFulfillmentType] = useState<'DELIVERY' | 'SELF_PICKUP'>('DELIVERY');
-    const [selectedPickupTime, setSelectedPickupTime] = useState<Dayjs | null>(null); // 👈 NEW: Pickup time state
-    const [pickupTimeError, setPickupTimeError] = useState<string>(''); // 👈 NEW: Error state
+    const [selectedPickupTime, setSelectedPickupTime] = useState<Dayjs | null>(null);
+    const [pickupTimeError, setPickupTimeError] = useState<string>('');
+
+    // ✅ NEW: State for Razorpay modal
+    const [razorpayOrderData, setRazorpayOrderData] = useState<any>(null);
+    const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
+
     const dispatch = useAppDispatch();
     const user = useAppSelector(state => state.user);
     const cart = useAppSelector(selectCart);
@@ -71,6 +79,13 @@ const AddressPage = () => {
         }
     }, [user.user?.addresses]);
 
+    // ✅ NEW: useEffect to trigger Razorpay modal when data is ready
+    useEffect(() => {
+        if (razorpayOrderData && typeof window !== 'undefined' && (window as any).Razorpay) {
+            openRazorpayModal(razorpayOrderData, paymentOrderId!);
+        }
+    }, [razorpayOrderData, paymentOrderId]);
+
     const handleOpen = () => setOpen(true);
     const handleClose = () => setOpen(false);
 
@@ -81,13 +96,97 @@ const AddressPage = () => {
     const handleFulfillmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const selectedValue = (event.target as HTMLInputElement).value as 'DELIVERY' | 'SELF_PICKUP';
         setFulfillmentType(selectedValue);
-        
+
         if (selectedValue === 'SELF_PICKUP') {
             setSelectedAddressId(null);
-            setSelectedPickupTime(null); // 👈 Reset pickup time when switching
+            setSelectedPickupTime(null);
         } else if (user.user?.addresses && user.user.addresses.length > 0) {
             setSelectedAddressId(user.user.addresses[0]._id);
         }
+    };
+
+    // ✅ NEW: Razorpay Modal Function
+    const openRazorpayModal = (orderData: any, paymentOrderId: string) => {
+        const options = {
+            key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_SmO760j2VBTxSH',
+            amount: orderData.amount,
+            currency: orderData.currency,
+            name: "MANIVASAGAN",
+            description: "Order Payment",
+            order_id: orderData.order_id,
+
+            handler: async function (response: any) {
+                console.log("✅ Payment successful:", response);
+
+                try {
+                    // ✅ Notify backend to verify payment & create actual orders
+                    const verifyResp = await axios.get(
+                        `http://localhost:8080/api/payment/${response.razorpay_payment_id}?paymentLinkId=${paymentOrderId}`,
+                        {
+                            headers: {
+                                Authorization: `Bearer ${localStorage.getItem('jwt')}`
+                            }
+                        }
+                    );
+
+                    console.log("✅ Orders created:", verifyResp.data.orders);
+
+                    // ✅ Clear cart via Redux
+                    dispatch(clearCartAfterOrder());
+
+                    // ✅ Redirect to success page
+                    navigate('/payment-success', {
+                        state: {
+                            paymentId: response.razorpay_payment_id,
+                            orderId: response.razorpay_order_id,
+                            signature: response.razorpay_signature
+                        }
+                    });
+
+                } catch (err: any) {
+                    console.error("❌ Payment verification failed:", err);
+                    setSnackbarMessage('Payment succeeded but order creation failed. Please contact support.');
+                    setSnackbarSeverity('error');
+                    setSnackbarOpen(true);
+                } finally {
+                    setRazorpayOrderData(null);
+                    setPaymentOrderId(null);
+                }
+            },
+
+            prefill: {
+                name: orderData.customer.name,
+                email: orderData.customer.email,
+                contact: orderData.customer.contact
+            },
+
+            theme: {
+                color: "#3399cc"
+            },
+
+            modal: {
+                ondismiss: function () {
+                    console.log("Modal closed by user");
+                    setRazorpayOrderData(null);
+                    setPaymentOrderId(null);
+                }
+            }
+        };
+
+        // ✅ Open desktop modal
+        const rzp = new (window as any).Razorpay(options);
+
+        // Handle payment errors
+        rzp.on('payment.failed', function (response: any) {
+            console.error("❌ Payment failed:", response.error);
+            setSnackbarMessage(response.error.description || 'Payment failed');
+            setSnackbarSeverity('error');
+            setSnackbarOpen(true);
+            setRazorpayOrderData(null);
+            setPaymentOrderId(null);
+        });
+
+        rzp.open();
     };
 
     const handleCreateOrder = async () => {
@@ -136,19 +235,56 @@ const AddressPage = () => {
         setCheckoutLoading(true);
 
         try {
-            const result = await dispatch(createOrder({
-                address: selectedAddress,
-                fulfillmentType,
-                pickupTime: selectedPickupTime ? selectedPickupTime.toISOString() : undefined, // 👈 Pass pickup time
-                jwt: localStorage.getItem('jwt') || "",
-                paymentGateway
-            })).unwrap();
+             const subtotal = cart.totalSellingPrice;
+  const shippingCost = 0;  // ✅ Changed from: 60
+  const platformFee = 7;
+  const discount = cart.couponPrice || 0;
+  
+  const finalAmount = subtotal + shippingCost + platformFee - discount;
 
-            if (result.payment_link_url) {
-                window.location.href = result.payment_link_url;
-            } else {
-                navigate('/account/orders');
+  console.log("💰 Calculated final amount (NO SHIPPING):", finalAmount);
+  console.log("  - Subtotal:", subtotal);
+  console.log("  - Shipping:", shippingCost);  // Will show 0
+  console.log("  - Platform fee:", platformFee);
+  console.log("  - Discount:", discount);
+
+  const result: any = await dispatch(createOrder({
+    address: selectedAddress,
+    fulfillmentType,
+    pickupTime: selectedPickupTime ? selectedPickupTime.toISOString() : undefined,
+    jwt: localStorage.getItem('jwt') || "",
+    paymentGateway,
+    finalAmount  // ✅ Send final calculated amount (without shipping)
+  })).unwrap();
+
+            // ✅ Type Guard 1: Check for Razorpay Order (NEW)
+            if (result && result.type === 'RAZORPAY_ORDER' && result.razorpayOrder) {
+                console.log("🎯 Razorpay Order received:", result.razorpayOrder);
+
+                // ✅ Store data to trigger modal via useEffect
+                setRazorpayOrderData(result.razorpayOrder);
+                setPaymentOrderId(result.paymentOrderId);
+
+                // ✅ Modal will open automatically via useEffect
+                return;
             }
+
+            // ✅ Type Guard 2: Check for Payment Link (OLD fallback)
+            if (result && typeof result === 'object' && 'payment_link_url' in result && result.payment_link_url) {
+                window.location.href = result.payment_link_url;
+                return;
+            }
+
+            // ✅ Type Guard 3: Check for COD success
+            if (result && typeof result === 'object' && 'success' in result && result.success && 'orders' in result && result.orders) {
+                // Clear cart via Redux
+                dispatch(clearCartAfterOrder());
+                navigate('/account/orders');
+                return;
+            }
+
+            // Default fallback
+            navigate('/account/orders');
 
         } catch (error: any) {
             setSnackbarMessage(error || 'Failed to create order');
@@ -181,7 +317,7 @@ const AddressPage = () => {
     };
 
     return (
-        <LocalizationProvider dateAdapter={AdapterDayjs}> {/* 👈 Wrap with LocalizationProvider */}
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
             <div className='pt-10 px-5 sm:px-10 md:px-44 lg:px-60 min-h-screen'>
                 <div className='space-y-5 lg:space-y-0 lg:grid grid-cols-3 lg:gap-9'>
                     <div className="col-span-2 space-y-5">
@@ -216,7 +352,6 @@ const AddressPage = () => {
                                 )}
                             </>
                         ) : (
-                            // Self Pickup Info
                             <div className='p-4 bg-blue-50 rounded-md border border-blue-200'>
                                 <div className='flex items-start gap-3'>
                                     <StorefrontIcon sx={{ color: 'blue', mt: 0.5 }} />
@@ -261,13 +396,12 @@ const AddressPage = () => {
                                         className={`border rounded-md p-2 ${fulfillmentType === item.value
                                             ? "border-primary-color bg-primary-color/10"
                                             : ""
-                                        }`}
+                                            }`}
                                     />
                                 ))}
                             </RadioGroup>
                         </section>
 
-                        {/* ✅ NEW: Pickup Time Selection (only for self-pickup) */}
                         {fulfillmentType === 'SELF_PICKUP' && (
                             <section className='space-y-3 border p-5 rounded-md'>
                                 <h1 className='text-primary-color font-medium pb-2 text-center'>
@@ -281,7 +415,7 @@ const AddressPage = () => {
                                         setSelectedPickupTime(newValue);
                                         setPickupTimeError('');
                                     }}
-                                    minDateTime={dayjs().add(1, 'hour')} // Minimum 1 hour from now
+                                    minDateTime={dayjs().add(1, 'hour')}
                                     disablePast
                                     slotProps={{
                                         textField: {
@@ -333,7 +467,7 @@ const AddressPage = () => {
                                         className={`border rounded-md p-2 ${paymentGateway === item.value
                                             ? "border-primary-color bg-primary-color/10"
                                             : ""
-                                        }`}
+                                            }`}
                                     />
                                 ))}
                             </RadioGroup>
@@ -348,7 +482,7 @@ const AddressPage = () => {
                                     variant='contained'
                                     fullWidth
                                     disabled={
-                                        checkoutLoading || 
+                                        checkoutLoading ||
                                         (fulfillmentType === 'DELIVERY' && !selectedAddressId) ||
                                         (fulfillmentType === 'SELF_PICKUP' && !selectedPickupTime)
                                     }

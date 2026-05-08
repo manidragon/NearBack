@@ -21,9 +21,9 @@ import {
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../../../Redux Toolkit/Store";
-import { getAllProducts } from "../../../Redux Toolkit/Customer/ProductSlice";
 import { fetchCategories } from "../../../Redux Toolkit/Admin/CategorySlice";
 import type { Category } from "../../../types/categoryTypes";
+import { getAllProducts, selectLocationFilter } from "../../../Redux Toolkit/Customer/ProductSlice";
 
 const Products = () => {
   const [sort, setSort] = React.useState("");
@@ -37,6 +37,7 @@ const Products = () => {
   const categoryState = useAppSelector((state) => state.category);
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
+  const locationFilter = useAppSelector(selectLocationFilter);
 
   // ✅ Fetch categories if not already loaded
   useEffect(() => {
@@ -49,11 +50,11 @@ const Products = () => {
   const getCategorySlugFromId = useMemo(() => {
     return (id: string | undefined): string | undefined => {
       if (!id || !categoryState.categories?.length) return undefined;
-      
+
       const category = categoryState.categories.find(
         (cat: Category) => cat._id === id
       );
-      
+
       return category?.categoryId;
     };
   }, [categoryState.categories]);
@@ -66,15 +67,15 @@ const Products = () => {
   // ✅ Get category name for display
   const categoryName = useMemo(() => {
     if (!categoryId) return 'Products';
-    
+
     const category = categoryState.categories.find(
       (cat: Category) => cat._id === categoryId
     );
-    
+
     if (category?.name) {
       return category.name;
     }
-    
+
     return categoryId
       .split('_')
       .map((item: string) => item.charAt(0).toUpperCase() + item.slice(1).toLowerCase())
@@ -93,52 +94,60 @@ const Products = () => {
     setPage(value);
   };
 
-  // ✅✅✅ FIX: Collect ALL filter params including dynamic attribute filters
-  useEffect(() => {
-    // Skip if no categoryId from URL
-    if (!categoryId) return;
+// ✅✅✅ FIX: Collect ALL filter params including dynamic attribute filters
+useEffect(() => {
+  // Skip if no categoryId from URL
+  if (!categoryId) return;
 
-    const [minPrice, maxPrice] = searchParams.get("price")?.split("-") || [];
-    
-    // ✅✅✅ NEW: Collect ALL search params as filters (including dynamic attributes)
-    const allFilterParams: Record<string, any> = {};
-    
-    // Known filter params
-    if (searchParams.get("brand")) allFilterParams.brand = searchParams.get("brand");
-    if (searchParams.get("color")) allFilterParams.color = searchParams.get("color");
-    if (minPrice) allFilterParams.minPrice = Number(minPrice);
-    if (maxPrice) allFilterParams.maxPrice = Number(maxPrice);
-    if (searchParams.get("discount")) {
-      allFilterParams.minDiscount = Number(searchParams.get("discount"));
+  const [minPrice, maxPrice] = searchParams.get("price")?.split("-") || [];
+  
+  // ✅✅✅ NEW: Collect ALL search params as filters (including dynamic attributes)
+  const allFilterParams: Record<string, any> = {};
+  
+  // Known filter params
+  if (searchParams.get("brand")) allFilterParams.brand = searchParams.get("brand");
+  if (searchParams.get("color")) allFilterParams.color = searchParams.get("color");
+  if (minPrice) allFilterParams.minPrice = Number(minPrice);
+  if (maxPrice) allFilterParams.maxPrice = Number(maxPrice);
+  if (searchParams.get("discount")) {
+    allFilterParams.minDiscount = Number(searchParams.get("discount"));
+  }
+  
+  // ✅✅✅ NEW: Collect dynamic attribute filters (ram, storage, size, etc.)
+  // Exclude known params to get only attribute filters
+  const knownParams = ['price', 'brand', 'color', 'discount', 'sort', 'page', 'category'];
+  searchParams.forEach((value, key) => {
+    if (!knownParams.includes(key) && value) {
+      allFilterParams[key] = value; // e.g., ram: "8GB,16GB", storage: "128GB"
     }
-    
-    // ✅✅✅ NEW: Collect dynamic attribute filters (ram, storage, size, etc.)
-    // Exclude known params to get only attribute filters
-    const knownParams = ['price', 'brand', 'color', 'discount', 'sort', 'page', 'category'];
-    searchParams.forEach((value, key) => {
-      if (!knownParams.includes(key) && value) {
-        allFilterParams[key] = value; // e.g., ram: "8GB,16GB", storage: "128GB"
-      }
-    });
+  });
 
-    const validSort = sort && ['price_low', 'price_high'].includes(sort) ? sort : '';
-    
-    console.log('📡 [PRODUCTS] Sending filters to API:', {
-      category: categoryId,
-      sort: validSort,
-      page: page - 1,
-      filters: allFilterParams
-    });
+  const validSort = sort && ['price_low', 'price_high'].includes(sort) ? sort : '';
+  
+  console.log('📡 [PRODUCTS] Sending filters to API:', {
+    category: categoryId,
+    sort: validSort,
+    page: page - 1,
+    locationFilter,  // ✅ Log location filter
+    filters: allFilterParams
+  });
 
-    // ✅ Send ALL filters to API
-    dispatch(getAllProducts({ 
-      category: categoryId,  // ObjectId for products API
-      sort: validSort, 
-      pageNumber: page - 1,
-      ...allFilterParams  // ✅ Spread all filter params
-    }));
-  }, [searchParams, categoryId, sort, page, dispatch]); // ✅ Dependencies trigger re-fetch on filter change
+  // ✅ Send ALL filters to API
+  dispatch(getAllProducts({ 
+    category: categoryId,  // ObjectId for products API
+    sort: validSort, 
+    pageNumber: page - 1,
+    locationFilter,  // ✅ Pass location filter from Redux
+    ...allFilterParams  // ✅ Spread all filter params
+  }));
+}, [searchParams, categoryId, sort, page, dispatch, locationFilter]); // ✅ Dependencies trigger re-fetch on filter change
 
+// ✅ NEW: Reset to page 1 when locationFilter changes
+useEffect(() => {
+  if (locationFilter) {
+    setPage(1);  // Reset to first page when district/location changes
+  }
+}, [locationFilter]);
   // ✅ Safe products array getter
   const productsToRender = products.products || [];
 
@@ -214,7 +223,7 @@ const Products = () => {
               </h1>
             </section>
           )}
-          
+
           {/* Pagination */}
           {products.totalPages > 1 && (
             <div className="flex justify-center pt-10">

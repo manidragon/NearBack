@@ -1,8 +1,6 @@
 // D:\Mani\Code with Zosh\Backup\source code\backend\src\services\PaymentService.js
 
 require("dotenv").config();
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
 const PaymentOrder = require('../models/PaymentOrder');
 const Order = require('../models/Order');
 const User = require('../models/User');
@@ -10,6 +8,7 @@ const PaymentStatus = require('../domain/PaymentStatus');
 const PaymentOrderStatus = require('../domain/PaymentOrderStatus');
 const OrderStatus = require('../domain/OrderStatus');
 const razorpay = require("../config/razorpayClient");
+const mongoose = require('mongoose');
 
 class PaymentService {
 
@@ -52,13 +51,25 @@ class PaymentService {
         return paymentOrder;
     }
 
-    async getPaymentOrderByPaymentId(paymentLinkId) {
-        const paymentOrder = await PaymentOrder.findOne({ paymentLinkId });
-        if (!paymentOrder) {
-            throw new Error('Payment order not found with provided payment link id');
-        }
-        return paymentOrder;
-    }
+async getPaymentOrderByPaymentId(paymentLinkId) {
+  // Try to find by paymentLinkId field (Razorpay order ID) first
+  let paymentOrder = await PaymentOrder.findOne({ paymentLinkId });
+  
+  // If not found, try to find by MongoDB _id (in case frontend sends _id)
+  if (!paymentOrder && mongoose.Types.ObjectId.isValid(paymentLinkId)) {
+    paymentOrder = await PaymentOrder.findById(paymentLinkId);
+  }
+  
+  if (!paymentOrder) {
+    console.error("❌ PaymentOrder not found for:", {
+      paymentLinkId,
+      isValidObjectId: mongoose.Types.ObjectId.isValid(paymentLinkId)
+    });
+    throw new Error('Payment order not found with provided payment link id');
+  }
+  
+  return paymentOrder;
+}
 
     // ✅ UPDATED: Handle both scenarios - with and without pre-created orders
     async proceedPaymentOrder(paymentOrder, paymentId, paymentLinkId) {
@@ -90,14 +101,14 @@ class PaymentService {
 
     async createRazorpayPaymentLink(user, amount, paymentOrderId) {
         try {
-
-            console.log('Razorpay config check:');
-            console.log('Key ID exists:', !!process.env.RAZORPAY_KEY_ID);
-            console.log('Key Secret exists:', !!process.env.RAZORPAY_KEY_SECRET);
             // Validate user has required fields
             if (!user.fullName || !user.email) {
                 throw new Error("User must have fullName and email");
             }
+
+            // ✅ Use env var for callback URL with fallback
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+            const callback_url = `${frontendUrl}/payment-success?payment_order_id=${paymentOrderId}`;
 
             const paymentLinkRequest = {
                 amount: amount * 100, // Convert to paise
@@ -105,25 +116,56 @@ class PaymentService {
                 customer: {
                     name: user.fullName,
                     email: user.email,
-                    contact: user.mobile || '' // Optional mobile
+                    contact: user.mobile || ''
                 },
                 notify: {
-                    sms: true,
+                    sms: false,  // Disable SMS in test mode to avoid spam
                     email: true
                 },
-                callback_url: `http://localhost:5173/payment-success?payment_order_id=${paymentOrderId}`,
+                callback_url: callback_url,  // ✅ Now uses env var
                 callback_method: 'get'
             };
 
-            const paymentLink = await razorpay.paymentLink.create(paymentLinkRequest);
-            console.log("payment link created:", paymentLink);
+            console.log('🔗 Creating Razorpay payment link:', {
+                amount: paymentLinkRequest.amount,
+                customer: paymentLinkRequest.customer.email,
+                callback: callback_url
+            });
 
+            const paymentLink = await razorpay.paymentLink.create(paymentLinkRequest);
+            console.log("✅ Payment link created:", paymentLink.id);
             return paymentLink;
+
         } catch (err) {
-            console.error("Full Razorpay error:", JSON.stringify(err, null, 2));
-            throw new Error(`Failed to create payment link: ${err.message}`);
+            // ✅ FIXED: Handle Razorpay error object properly
+            console.error("❌ Razorpay Error Details:", {
+                name: err.name,
+                message: err.message,
+                description: err.description,
+                statusCode: err.statusCode,
+                error: err.error,
+                reason: err.error?.reason,
+                field: err.error?.field,
+                source: err.error?.source,
+                step: err.error?.step,
+                // Full serialized error for debugging
+                fullError: JSON.stringify(err, Object.getOwnPropertyNames(err), 2)
+            });
+
+            // ✅ Extract meaningful error message
+            const errorMessage =
+                err.description ||
+                err.error?.description ||
+                err.error?.reason ||
+                err.message ||
+                err.error ||
+                'Unknown Razorpay error - check server logs';
+
+            throw new Error(`Failed to create payment link: ${errorMessage}`);
         }
     }
+
+    
 
     async createStripePaymentLink(user, amount, paymentOrderId) {
         try {

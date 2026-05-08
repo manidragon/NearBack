@@ -31,13 +31,11 @@ export const fetchCategoryAttributes = createAsyncThunk(
       
       // ✅ FIX: Handle the response structure correctly
       if (response.data && Array.isArray(response.data.data)) {
-        console.log('✅ [Redux Slice] Attributes fetched:', response.data.data.length);
         return response.data.data;  // ✅ Return the array inside 'data' field
       }
       
       // Fallback: if response is already an array
       if (Array.isArray(response.data)) {
-        console.log('✅ [Redux Slice] Attributes fetched (array):', response.data.length);
         return response.data;
       }
       

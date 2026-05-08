@@ -131,12 +131,21 @@ const wishlistSlice = createSlice({
       state.error = null;
     });
     builder.addCase(
-      addProductToWishlist.fulfilled,
-      (state, action: PayloadAction<Wishlist>) => {
-        state.wishlist = action.payload;
-        state.loading = false;
-      }
-    );
+  addProductToWishlist.fulfilled,
+  (state, action: PayloadAction<any>) => {
+    state.loading = false;
+    const wishlistData = action.payload.wishlist || action.payload;
+    
+    if (wishlistData) {
+      state.wishlist = wishlistData;
+    }
+    
+    console.log('✅ [Redux] Wishlist state updated:', {
+      productCount: wishlistData?.products?.length,
+      wishlistId: wishlistData?._id
+    });
+  }
+);
     builder.addCase(
       addProductToWishlist.rejected,
       (state, action: PayloadAction<any>) => {
@@ -150,13 +159,17 @@ const wishlistSlice = createSlice({
       state.loading = true;
       state.error = null;
     });
-    builder.addCase(
-      removeProductFromWishlist.fulfilled,
-      (state, action: PayloadAction<Wishlist>) => {
-        state.wishlist = action.payload;
-        state.loading = false;
-      }
-    );
+  builder.addCase(
+  removeProductFromWishlist.fulfilled,
+  (state, action: PayloadAction<any>) => {
+    state.loading = false;
+    
+    const wishlistData = action.payload.wishlist || action.payload;
+    if (wishlistData) {
+      state.wishlist = wishlistData;
+    }
+  }
+);
     builder.addCase(
       removeProductFromWishlist.rejected,
       (state, action: PayloadAction<any>) => {

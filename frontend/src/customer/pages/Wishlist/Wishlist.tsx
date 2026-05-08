@@ -1,14 +1,37 @@
-import { useAppSelector } from '../../../Redux Toolkit/Store';
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Wishlist\Wishlist.tsx
+
+import { useEffect } from 'react';
+import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
+import { getWishlistByUserId } from '../../../Redux Toolkit/Customer/WishlistSlice';
 import WishlistProductCard from './WishlistProductCard';
 
 const Wishlist = () => {
-  const { wishlist, loading } = useAppSelector(state => state.wishlist);
+  const dispatch = useAppDispatch();
+  const { wishlist, loading, error } = useAppSelector(state => state.wishlist);
 
-  // Handle case where wishlist hasn't loaded yet
+  // ✅ FIX: Fetch wishlist on mount
+  useEffect(() => {
+    const jwt = localStorage.getItem('jwt');
+    if (jwt) {
+      dispatch(getWishlistByUserId(jwt));
+    }
+  }, [dispatch]);
+
+  // Handle loading state
   if (loading && !wishlist) {
     return (
       <div className="h-[85vh] flex justify-center items-center">
-        Loading your wishlist...
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500"></div>
+        <span className="ml-2">Loading your wishlist...</span>
+      </div>
+    );
+  }
+
+  // Handle error state
+  if (error) {
+    return (
+      <div className="h-[85vh] flex justify-center items-center">
+        <p className="text-red-500">Error: {error}</p>
       </div>
     );
   }
@@ -25,7 +48,8 @@ const Wishlist = () => {
           </h1>
           <div className="pt-10 flex flex-wrap gap-5">
             {products.map((item) => (
-              <WishlistProductCard key={item._id} item={item} />
+              // ✅ FIX: Use composite key for stability
+              <WishlistProductCard key={item._id || item.title} item={item} />
             ))}
           </div>
         </section>

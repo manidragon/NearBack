@@ -1,5 +1,7 @@
-// Order.tsx
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Account\Order.tsx
+
 import { useEffect } from 'react';
+import { Box, Typography, CircularProgress, Alert } from '@mui/material';
 import OrderItemCard from './OrderItemCard';
 import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
 import { fetchUserOrderHistory } from '../../../Redux Toolkit/Customer/OrderSlice';
@@ -10,32 +12,94 @@ const Order = () => {
   const orders = useAppSelector(state => state.orders);
 
   useEffect(() => {
-    dispatch(fetchUserOrderHistory(localStorage.getItem("jwt") || ""));
-  }, [auth.jwt]);
+    const jwt = localStorage.getItem("jwt");
+    if (jwt) {
+      dispatch(fetchUserOrderHistory(jwt));
+    }
+  }, [auth.jwt, dispatch]);
 
-  // ✅ Filter orders by fulfillment type
-  const selfPickupOrders = orders.orders.filter(order => order.fulfillmentType === 'SELF_PICKUP');
-  const deliveryOrders = orders.orders.filter(order => order.fulfillmentType === 'DELIVERY');
+  // ✅ FIX 1: Safe orders array with fallback
+  const ordersList = orders?.orders || [];
 
-  // ✅ Helper function to render order items for a specific order type
+  // ✅ FIX 2: Safe filtering with null checks
+  const selfPickupOrders = ordersList.filter(order => 
+    order?.fulfillmentType === 'SELF_PICKUP'
+  );
+  const deliveryOrders = ordersList.filter(order => 
+    order?.fulfillmentType === 'DELIVERY' || !order?.fulfillmentType // Default to delivery
+  );
+
+  // ✅ FIX 3: Render order items with proper key and null checks
   const renderOrderItems = (orderList: any[]) => {
-    return orderList.flatMap(order => 
-      order.orderItems.map((item: any) => (
-        <OrderItemCard key={item._id} item={item} order={order} />
-      ))
-    );
+    return orderList.flatMap(order => {
+      // Skip invalid orders
+      if (!order?._id || !Array.isArray(order.orderItems)) {
+        console.warn('⚠️ Skipping invalid order:', order?._id);
+        return [];
+      }
+      
+      return order.orderItems.map((item: any) => {
+        // ✅ Use composite key: order._id + item._id for uniqueness
+        const uniqueKey = `${order._id}-${item._id || 'unknown'}`;
+        
+        return (
+          <OrderItemCard 
+            key={uniqueKey}  // ✅ FIX: Proper unique key
+            item={item} 
+            order={order} 
+          />
+        );
+      });
+    });
   };
 
+  // ✅ FIX 4: Loading state
+  if (orders.loading) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 10 }}>
+        <CircularProgress />
+        <Typography sx={{ mt: 2 }}>Loading your orders...</Typography>
+      </Box>
+    );
+  }
+
+  // ✅ FIX 5: Error state
+  if (orders.error) {
+    return (
+      <Alert severity="error" sx={{ m: 3 }}>
+        {orders.error}
+      </Alert>
+    );
+  }
+
+  // ✅ FIX 6: Empty state with helpful message
+  if (ordersList.length === 0) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 10 }}>
+        <Typography variant="h6" color="text.secondary">
+          No orders yet
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Start shopping to see your orders here
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
-    <div className='text-sm min-h-screen'>
+    <div className='text-sm min-h-screen px-4 py-6'>
       {/* ✅ Self Pickup Orders Section */}
       {selfPickupOrders.length > 0 && (
         <div className='pb-8'>
-          <div className='pb-5'>
-            <h1 className='font-semibold text-xl'>🏪 Self Pickup Orders</h1>
-            <p>Ready for collection from store</p>
+          <div className='pb-5 border-b mb-4'>
+            <Typography variant="h5" fontWeight="bold">
+              🏪 Self Pickup Orders
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Ready for collection from store
+            </Typography>
           </div>
-          <div className='space-y-2'>
+          <div className='space-y-3'>
             {renderOrderItems(selfPickupOrders)}
           </div>
         </div>
@@ -44,20 +108,17 @@ const Order = () => {
       {/* ✅ Delivery Orders Section */}
       {deliveryOrders.length > 0 && (
         <div className='pb-8'>
-          <div className='pb-5'>
-            <h1 className='font-semibold text-xl'>🚚 Delivery Orders</h1>
-            <p>Shipped to your address</p>
+          <div className='pb-5 border-b mb-4'>
+            <Typography variant="h5" fontWeight="bold">
+              🚚 Delivery Orders
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Shipped to your address
+            </Typography>
           </div>
-          <div className='space-y-2'>
+          <div className='space-y-3'>
             {renderOrderItems(deliveryOrders)}
           </div>
-        </div>
-      )}
-
-      {/* ✅ No orders message */}
-      {orders.orders.length === 0 && (
-        <div className='text-center py-10'>
-          <p className='text-gray-500'>No orders found</p>
         </div>
       )}
     </div>

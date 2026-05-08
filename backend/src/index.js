@@ -1,19 +1,15 @@
 // D:\Mani\Code with Zosh\Backup\source code\backend\src\index.js
 require('dotenv').config(); 
-
 const express = require('express');
 const connectDB = require('./config/db.js');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-
-
 const app = express();
-app.use(cors());
 
+app.use(cors());
 app.get('/', (req, res) => {
   res.send({message:'Welcome To Near Look Backend System!'});
 });
-
 app.use(bodyParser.json());
 
 const productRouters=require("./routers/productRoutes.js")

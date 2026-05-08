@@ -1,5 +1,4 @@
-// BecomeSeller.tsx
-
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\BecomeSeller\BecomeSeller.tsx
 import { Alert, Button, Snackbar } from "@mui/material";
 import { useState, useEffect } from "react";
 import SellerAccountForm from "./SellerAccountForm";

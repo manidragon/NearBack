@@ -3,6 +3,16 @@ const mongoose = require('mongoose');
 const UserRoles = require('../domain/UserRole');
 const AccountStatus = require('../domain/AccountStatus');
 
+const TN_DISTRICTS = [
+  'Ariyalur', 'Chengalpattu', 'Chennai', 'Coimbatore', 'Cuddalore', 
+  'Dharmapuri', 'Dindigul', 'Erode', 'Kallakurichi', 'Kanchipuram', 
+  'Kanyakumari', 'Karur', 'Krishnagiri', 'Madurai', 'Mayiladuthurai', 
+  'Nagapattinam', 'Namakkal', 'Nilgiris', 'Perambalur', 'Pudukkottai', 
+  'Ramanathapuram', 'Ranipet', 'Salem', 'Sivaganga', 'Tenkasi', 
+  'Thanjavur', 'Theni', 'Thoothukudi', 'Tiruchirappalli', 'Tirunelveli', 
+  'Tirupathur', 'Tiruppur', 'Tiruvallur', 'Tiruvannamalai', 'Tiruvarur', 
+  'Vellore', 'Viluppuram', 'Virudhunagar'
+];
 
 // Define the Seller schema
 const sellerSchema = new mongoose.Schema({
@@ -24,6 +34,26 @@ const sellerSchema = new mongoose.Schema({
         required: true,
         select: false  
     },
+  district: {
+    type: String,
+    enum: TN_DISTRICTS,
+      default: null,
+    index: true,
+    trim: true
+  },
+location: {
+  type: {
+    type: String,
+    enum: ['Point']
+  },
+  coordinates: {
+    type: [Number]
+  },
+  address: {
+    type: String,
+    trim: true
+  }
+},
     businessDetails: {
         businessName: {
             type: String,
@@ -94,6 +124,9 @@ const sellerSchema = new mongoose.Schema({
 }, {
     timestamps: true  
 });
+
+sellerSchema.index({ district: 1 });  
+sellerSchema.index({ 'location.coordinates': '2dsphere' }, { sparse: true }); 
 
 const Seller = mongoose.model('Seller', sellerSchema);
 

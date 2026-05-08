@@ -3,10 +3,6 @@ const express = require('express');
 const productController = require('../controllers/productController');
 const router = express.Router();
 
-// 🔍 Debug logs (keep for now, remove later)
-console.log('🔍 productController type:', typeof productController);
-console.log('🔍 productController keys:', Object.keys(productController));
-
 // ✅ FIX: Use correct method names that exist in controller
 
 // Search for products by query
