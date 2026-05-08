@@ -1,20 +1,23 @@
+// frontend/src/customer/pages/Account/OrderStepper.tsx
+
 import { Box } from "@mui/material";
 import { useEffect, useState } from "react";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 
-// Standard delivery steps
+// ✅ Delivery steps
 const deliverySteps = [
   { name: "Order Placed", description: "Order has been placed", value: "PLACED" },
   { name: "Packed", description: "Item packed in warehouse", value: "CONFIRMED" },
   { name: "Shipped", description: "Order is on the way", value: "SHIPPED" },
-  { name: "Out for Delivery", description: "Arriving soon", value: "ARRIVING" },
+  { name: "Out for Delivery", description: "Arriving soon", value: "OUT_FOR_DELIVERY" },
   { name: "Delivered", description: "Order delivered successfully", value: "DELIVERED" },
 ];
 
-// Self pickup steps
+// ✅ Self Pickup steps
 const pickupSteps = [
   { name: "Order Placed", description: "Order has been placed", value: "PLACED" },
+  { name: "Confirmed", description: "Order confirmed by seller", value: "CONFIRMED" },
   { name: "Ready for Pickup", description: "Your order is ready at the store", value: "READY_FOR_PICKUP" },
   { name: "Picked Up", description: "Order collected from store", value: "DELIVERED" },
 ];
@@ -27,7 +30,7 @@ const canceledStep = [
 
 interface OrderStepperProps {
   orderStatus: string;
-  fulfillmentType?: 'DELIVERY' | 'SELF_PICKUP'; // Optional prop
+  fulfillmentType?: 'DELIVERY' | 'SELF_PICKUP';
 }
 
 const OrderStepper = ({ orderStatus, fulfillmentType = 'DELIVERY' }: OrderStepperProps) => {
@@ -40,12 +43,12 @@ const OrderStepper = ({ orderStatus, fulfillmentType = 'DELIVERY' }: OrderSteppe
       const stepIndex = canceledStep.findIndex(step => step.value === orderStatus);
       setCurrentStep(stepIndex >= 0 ? stepIndex : 0);
     } else if (fulfillmentType === 'SELF_PICKUP') {
-      // Use pickup steps for self-pickup orders
+      // ✅ Use pickup steps for self-pickup orders
       setStatusStep(pickupSteps);
       const stepIndex = pickupSteps.findIndex(step => step.value === orderStatus);
       setCurrentStep(stepIndex >= 0 ? stepIndex : 0);
     } else {
-      // Default to delivery steps
+      // ✅ Default to delivery steps
       setStatusStep(deliverySteps);
       const stepIndex = deliverySteps.findIndex(step => step.value === orderStatus);
       setCurrentStep(stepIndex >= 0 ? stepIndex : 0);

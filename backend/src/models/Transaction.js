@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\backend\src\models\Transaction.js
 const mongoose = require('mongoose');
 
 const transactionSchema = new mongoose.Schema({

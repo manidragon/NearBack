@@ -1,8 +1,8 @@
+// D:\Mani\Code with Zosh\Backup\source code\backend\src\routers\wishlistRoutes.js
 const express = require("express");
 const router = express.Router();
 const wishlistController = require("../controllers/wishlistController");
 const authMiddleware = require("../middlewares/userAuthMiddleware");
-
 
 router.get("/", authMiddleware,  
   wishlistController.getWishlistByUserId);

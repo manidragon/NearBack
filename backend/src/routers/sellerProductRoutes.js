@@ -4,11 +4,6 @@ const productController = require("../controllers/productController");
 const sellerAuthMiddleware = require("../middlewares/sellerAuthMiddleware");
 const router = express.Router();
 
-// 🔍 Debug: Verify method exists before using
-console.log('🔍 [SELLER ROUTES] Checking getProductBySellerId vs getSellerProducts:');
-console.log('  - productController.getSellerProducts:', typeof productController.getSellerProducts);
-console.log('  - productController.getProductBySellerId:', typeof productController.getProductBySellerId);
-
 // ✅ FIX: Changed getProductBySellerId → getSellerProducts (matches controller)
 router.get(
   "/",

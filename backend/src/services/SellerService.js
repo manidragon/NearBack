@@ -14,32 +14,75 @@ class SellerService {
     return this.getSellerByEmail(email);
   }
 
-  async createSeller(sellerData) {
-    const existingSeller = await Seller.findOne({ email: sellerData.email });
-    if (existingSeller) {
-      throw new SellerError("Seller already exists, use a different email");
-    }
+ async createSeller(sellerData) {
+  // ✅ DEBUG: Log incoming payload
+  console.log('🔍 [DEBUG] createSeller received:', {
+    email: sellerData.email,
+    hasLocation: !!sellerData.location,
+    location: sellerData.location
+  });
 
-    let savedAddress = sellerData.pickupAddress;
-
-    if (!sellerData.pickupAddress._id) {
-      savedAddress = await Address.create(sellerData.pickupAddress);
-    }
-
-    const newSeller = new Seller({
-      email: sellerData.email,
-      pickupAddress: savedAddress,
-      sellerName: sellerData.sellerName,
-      GSTIN: sellerData.GSTIN,
-      role: UserRoles.ROLE_SELLER,
-      mobile: sellerData.mobile,
-      password: await bcrypt.hash(sellerData.password, 10),
-      bankDetails: sellerData.bankDetails,
-      businessDetails: sellerData.businessDetails,
-    });
-
-    return await newSeller.save();
+  const existingSeller = await Seller.findOne({ email: sellerData.email });
+  if (existingSeller) {
+    throw new SellerError("Seller already exists, use a different email");
   }
+
+  let savedAddress = sellerData.pickupAddress;
+  if (!sellerData.pickupAddress._id) {
+    savedAddress = await Address.create(sellerData.pickupAddress);
+  }
+
+  // ✅ STRICT: Only build location if BOTH lat AND lng are valid numbers
+  let locationData = null;
+  const coords = sellerData.location?.coordinates;
+  if (coords &&
+      typeof coords.lat === 'number' &&
+      typeof coords.lng === 'number' &&
+      !isNaN(coords.lat) &&
+      !isNaN(coords.lng) &&
+      coords.lat >= -90 && coords.lat <= 90 &&
+      coords.lng >= -180 && coords.lng <= 180) {
+
+    locationData = {
+      type: 'Point',
+      coordinates: [coords.lng, coords.lat],
+      address: typeof sellerData.location.address === 'string'
+        ? sellerData.location.address.trim()
+        : undefined  // ✅ Use undefined, not ''
+    };
+  }
+
+  const newSeller = new Seller({
+    email: sellerData.email,
+    pickupAddress: savedAddress,
+    sellerName: sellerData.sellerName,
+    GSTIN: sellerData.GSTIN,
+    role: UserRoles.ROLE_SELLER,
+    mobile: sellerData.mobile,
+    password: await bcrypt.hash(sellerData.password, 10),
+    bankDetails: sellerData.bankDetails,
+    businessDetails: sellerData.businessDetails,
+    // ✅ ONLY include location if we have VALID coordinates
+    ...(locationData && { location: locationData }),
+    // ✅ ONLY include district if provided and non-empty
+    ...(sellerData.district && sellerData.district.trim() && {
+      district: sellerData.district.trim()
+    })
+  });
+
+  // ✅ FINAL SAFEGUARD: Remove invalid location objects before save
+  if (newSeller.location) {
+    const loc = newSeller.location;
+    if (loc.type === 'Point' && (!loc.coordinates || !Array.isArray(loc.coordinates) || loc.coordinates.length !== 2)) {
+      console.log('⚠️ [DEBUG] Removing invalid location before save:', loc);
+      delete newSeller.location;
+    } else if (loc.address && (!loc.coordinates || !Array.isArray(loc.coordinates))) {
+      delete newSeller.location.address;
+    }
+  }
+
+  return await newSeller.save();
+}
 
   async getSellerById(id) {
     const seller = await Seller.findById(id);
@@ -62,11 +105,45 @@ class SellerService {
     return await Seller.find({ accountStatus: status });
   }
 
-  async updateSeller(existingSeller, sellerData) {
-    return await Seller.findByIdAndUpdate(existingSeller._id, sellerData, {
-      new: true,
-    }).populate("pickupAddress");
+ async updateSeller(existingSeller, sellerData) {
+  const updatePayload = { ...sellerData };
+  
+  // ✅ STRICT: Only update location if coordinates are valid numbers
+  const coords = sellerData.location?.coordinates;
+  if (coords && 
+      typeof coords.lat === 'number' && 
+      typeof coords.lng === 'number' &&
+      !isNaN(coords.lat) && 
+      !isNaN(coords.lng)) {
+    
+    updatePayload.location = {
+      type: 'Point',
+      coordinates: [coords.lng, coords.lat],
+      address: typeof sellerData.location.address === 'string' 
+        ? sellerData.location.address.trim() 
+        : existingSeller.location?.address || ''
+    };
+  } 
+  // ✅ If location is explicitly set to null/empty, allow clearing it
+  else if (sellerData.location === null || sellerData.location === '') {
+    updatePayload.location = null;
   }
+  // ✅ If location is sent but invalid, IGNORE it (don't update)
+  
+  // Handle district update
+  if (sellerData.district && sellerData.district.trim()) {
+    updatePayload.district = sellerData.district.trim();
+  }
+
+  return await Seller.findByIdAndUpdate(
+    existingSeller._id, 
+    updatePayload, 
+    {
+      new: true,
+      runValidators: true
+    }
+  ).populate("pickupAddress");
+}
 
   async deleteSeller(id) {
     const exists = await Seller.exists({ _id: id });

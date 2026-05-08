@@ -1,4 +1,4 @@
-// D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Customer\ProductSlice.ts
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Customer/ProductSlice.ts
 import { createSlice, createAsyncThunk, type PayloadAction } from "@reduxjs/toolkit";
 import { type Product } from "../../types/productTypes";
 import { type RootState } from "../Store";
@@ -7,8 +7,15 @@ import { api } from "../../Config/Api";
 // Define the base URL for the API
 const API_URL = "/products";
 
+// ✅ FIX 1: ADD LocationFilter interface
+export interface LocationFilter {
+  type: 'current' | 'district';
+  coordinates?: { lat: number; lng: number };
+  district?: string;
+  radiusKm?: number; // Default: 50km for current location
+}
 
-// Define the initial state type
+// ✅ FIX 2: UPDATE ProductState interface with locationFilter
 interface ProductState {
   product: Product | null;
   products: Product[];
@@ -16,10 +23,14 @@ interface ProductState {
   totalPages: number;
   loading: boolean;
   error: string | null;
-  searchProduct: Product[]
+  searchProduct: Product[];
+  
+  // ✅ NEW: Location filter state
+  locationFilter: LocationFilter | null;
+  currentPage: number; // ✅ ADD: Track current page for pagination reset
 }
 
-// Define the initial state
+// ✅ FIX 3: UPDATE initialState with locationFilter and currentPage
 const initialState: ProductState = {
   product: null,
   products: [],
@@ -27,16 +38,33 @@ const initialState: ProductState = {
   totalPages: 1,
   loading: false,
   error: null,
-  searchProduct: []
+  searchProduct: [],
+  
+  // ✅ NEW: Initialize location fields
+  locationFilter: null,
+  currentPage: 0,
 };
 
 // Create async thunks for API calls
-export const fetchProductById = createAsyncThunk<Product, string>(
+export const fetchProductById = createAsyncThunk<Product, { productId: string; locationFilter?: LocationFilter | null }>(
   "products/fetchProductById",
-  async (productId, { rejectWithValue }) => {
+  async ({ productId, locationFilter }, { rejectWithValue, getState }) => {
     try {
-      const response = await api.get<Product>(`${API_URL}/${productId}`);
-      console.log("product details ", response.data);
+      // ✅ Get location from Redux state if not passed explicitly
+      const state = getState() as RootState;
+      const filter = locationFilter ?? state.products.locationFilter;
+
+      // ✅ Build params with location
+      const params: any = {};
+      if (filter?.type === 'current' && filter.coordinates) {
+        params.userLat = filter.coordinates.lat;
+        params.userLng = filter.coordinates.lng;
+        params.radiusKm = filter.radiusKm || 50;
+      } else if (filter?.type === 'district' && filter.district) {
+        params.district = filter.district;
+      }
+
+      const response = await api.get<Product>(`${API_URL}/${productId}`, { params });
       return response.data;
     } catch (error: any) {
       console.log("error ", error.response);
@@ -45,22 +73,35 @@ export const fetchProductById = createAsyncThunk<Product, string>(
   }
 );
 
+// ✅ FIX 6A: UPDATE searchProduct thunk to accept and include location params
 export const searchProduct = createAsyncThunk<
-  { success: boolean; data: Product[]; count: number; page: number; totalPages: number }, // ✅ Updated return type
-  string
->("products/searchProduct", async (query, { rejectWithValue }) => {
+  { success: boolean; data: Product[]; count: number; page: number; totalPages: number },
+  { query: string; locationFilter?: LocationFilter | null } // ✅ Accept optional location param
+>("products/searchProduct", async ({ query, locationFilter }, { rejectWithValue, getState }) => {
   try {
-    const response = await api.get(`${API_URL}/search`, {
-      params: { search: query }, // ✅ Send as 'search' param
-    });
+    // ✅ Get location from Redux state if not passed explicitly
+    const state = getState() as RootState;
+    const filter = locationFilter ?? state.products.locationFilter;
+
+    // ✅ Build params object with location filters
+    const params: any = { search: query };
+    
+    if (filter?.type === 'current' && filter.coordinates) {
+      params.userLat = filter.coordinates.lat;
+      params.userLng = filter.coordinates.lng;
+      params.radiusKm = filter.radiusKm || 50;
+    } else if (filter?.type === 'district' && filter.district) {
+      params.district = filter.district;
+    }
+
+    const response = await api.get(`${API_URL}/search`, { params });
     console.log("search products ", response.data);
-    return response.data; // ✅ Returns wrapped response
+    return response.data;
   } catch (error: any) {
     console.log("error ", error.response);
     return rejectWithValue(error.response.data);
   }
 });
-
 
 export const getAllProducts = createAsyncThunk<
   any,
@@ -75,22 +116,31 @@ export const getAllProducts = createAsyncThunk<
     sort?: string;
     stock?: string;
     pageNumber?: number;
+    locationFilter?: LocationFilter | null;
   }
 >("products/getAllProducts", async (params, { rejectWithValue, getState }) => {
   try {
-    // ✅ Check if we already have products for this category
-    const state = getState() as any;
-    const existingProducts = state.products.products;
+    const state = getState() as RootState;
+    const locationFilter = params.locationFilter ?? state.products.locationFilter;
+
+    // ✅ Extract params WITHOUT locationFilter to avoid nested serialization
+    const { locationFilter: _, ...cleanParams } = params;
     
-    // Optional: Add caching logic here if needed
-    
-    const response = await api.get<any>(API_URL, {
-      params: {
-        ...params,
-        pageNumber: params.pageNumber || 0,
-      },
-    });
-    console.log("all products ------ ", response.data);
+    const apiParams: any = {
+      ...cleanParams,  // ✅ Spread only clean params (no locationFilter object)
+      pageNumber: params.pageNumber || 0,
+    };
+
+    // ✅ Add location params as TOP-LEVEL params only
+    if (locationFilter?.type === 'current' && locationFilter.coordinates) {
+      apiParams.userLat = locationFilter.coordinates.lat;
+      apiParams.userLng = locationFilter.coordinates.lng;
+      apiParams.radiusKm = locationFilter.radiusKm || 50;
+    } else if (locationFilter?.type === 'district' && locationFilter.district) {
+      apiParams.district = locationFilter.district;  // ✅ Only this should be sent
+    }
+
+    const response = await api.get<any>(API_URL, { params: apiParams });
     return response.data;
   } catch (error: any) {
     console.log("error ", error.response);
@@ -102,7 +152,15 @@ export const getAllProducts = createAsyncThunk<
 const productSlice = createSlice({
   name: "products",
   initialState,
-  reducers: {},
+  // ✅ FIX 4: ADD reducers object with setLocationFilter
+  reducers: {
+    // ✅ NEW: Sync action to set location filter (no API call needed)
+    setLocationFilter: (state, action: PayloadAction<LocationFilter | null>) => {
+      state.locationFilter = action.payload;
+      state.currentPage = 0; // ✅ Reset pagination when location changes
+    },
+    // Optional: Add more sync actions here if needed
+  },
   extraReducers: (builder) => {
     builder
       .addCase(fetchProductById.pending, (state) => {
@@ -111,12 +169,9 @@ const productSlice = createSlice({
       })
       .addCase(
         fetchProductById.fulfilled,
-        (state, action: PayloadAction<any>) => {  // ✅ Change type to 'any' to handle wrapped response
-
-          // ✅ Extract product from wrapped response { success: true, data: {...} }
+        (state, action: PayloadAction<any>) => {
           const productData = action.payload?.data || action.payload;
-
-          state.product = productData;  // ✅ Assign the actual product object
+          state.product = productData;
           state.loading = false;
         }
       )
@@ -132,14 +187,10 @@ const productSlice = createSlice({
         searchProduct.fulfilled,
         (state, action: PayloadAction<{ success: boolean; data: Product[]; count: number; page: number; totalPages: number }>) => {
           console.log('🔍 searchProduct.fulfilled payload:', action.payload);
-
-          // ✅✅✅ CRITICAL: Extract the products array from wrapped response
           const productsArray = action.payload?.data || action.payload || [];
-
-          state.searchProduct = productsArray;  // ✅ Now stores the actual array
+          state.searchProduct = productsArray;
           state.loading = false;
-          state.error = null;  // ✅ Clear previous errors
-
+          state.error = null;
           console.log('✅ Search results loaded:', {
             count: productsArray.length,
             firstProduct: productsArray[0]?.title
@@ -149,7 +200,7 @@ const productSlice = createSlice({
       .addCase(searchProduct.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string || "Failed to search products";
-        state.searchProduct = [];  // ✅ Clear results on error
+        state.searchProduct = [];
       })
       .addCase(getAllProducts.pending, (state) => {
         state.loading = true;
@@ -158,21 +209,17 @@ const productSlice = createSlice({
       .addCase(
         getAllProducts.fulfilled,
         (state, action: PayloadAction<any>) => {
-
           let productsArray: Product[] = [];
           let totalPages = 1;
 
-          // ✅ Handle wrapped response { success: true, data: [...] }
           if (action.payload?.data && Array.isArray(action.payload.data)) {
             productsArray = action.payload.data;
-            totalPages = 1; // Backend may not send pagination for this endpoint
+            totalPages = 1;
           }
-          // Handle paginated response { content: [...], totalPages: 5 }
           else if (action.payload?.content && Array.isArray(action.payload.content)) {
             productsArray = action.payload.content;
             totalPages = action.payload.totalPages || 1;
           }
-          // Handle plain array
           else if (Array.isArray(action.payload)) {
             productsArray = action.payload;
             totalPages = 1;
@@ -191,6 +238,9 @@ const productSlice = createSlice({
   },
 });
 
+// ✅ FIX 5: EXPORT the setLocationFilter action
+export const { setLocationFilter } = productSlice.actions;
+
 export default productSlice.reducer;
 
 // Define selector functions
@@ -201,3 +251,7 @@ export const selectPaginatedProducts = (state: RootState) =>
 export const selectProductLoading = (state: RootState) =>
   state.products.loading;
 export const selectProductError = (state: RootState) => state.products.error;
+
+// ✅ FIX 7: ADD selector for location filter
+export const selectLocationFilter = (state: RootState) => 
+  state.products.locationFilter;

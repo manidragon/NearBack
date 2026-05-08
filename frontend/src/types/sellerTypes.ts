@@ -27,18 +27,24 @@ export interface BusinessDetails {
 }
 
 export interface Seller {
-    _id: string;                 // ✅ Changed from number to string (MongoDB ObjectId)
+    _id: string;
     mobile: string;
     GSTIN: string;
-    pickupAddress: string | PickupAddress;  // ✅ Can be ObjectId string or populated object
+    pickupAddress: string | PickupAddress;
     bankDetails: BankDetails;
     sellerName: string;
     email: string;
     businessDetails: BusinessDetails;
-    password?: string;           // ✅ Made optional (not returned in responses)
+    password?: string;
     accountStatus?: string;
+    district?: string;
+     location?: {
+    type: 'Point';
+    coordinates: [number, number]; // [longitude, latitude]
+    address?: string;
+  };
     role: string;
-    isEmailVerified?: boolean;   // ✅ Added
+    isEmailVerified?: boolean;
 }
 
 // ✅ New type for API responses that include JWT

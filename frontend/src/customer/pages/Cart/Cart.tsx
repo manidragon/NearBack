@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Cart\Cart.tsx
 import {
   Alert,
   Button,
@@ -24,7 +25,14 @@ const Cart = () => {
   const dispatch = useAppDispatch();
   const cart = useAppSelector((store) => store.cart);
   const auth = useAppSelector((store) => store.auth);
-  const coupone = useAppSelector((store) => store.coupone);
+
+  // ✅ FIX 1: Safe selector with fallback for coupon slice
+  const couponState = useAppSelector((store) => store.coupon) || {
+    couponApplied: false,
+    error: null,
+    message: null
+  };
+
   const [couponCode, setCouponCode] = useState("");
   const [snackbarOpen, setOpenSnackbar] = useState(false);
 
@@ -33,7 +41,7 @@ const Cart = () => {
     if (jwt) {
       dispatch(fetchUserCart(jwt));
     }
-  }, [auth.jwt, dispatch]); // ✅ include dispatch in deps
+  }, [auth.jwt, dispatch]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCouponCode(e.target.value);
@@ -56,17 +64,26 @@ const Cart = () => {
     setOpenSnackbar(false);
   };
 
+  // ✅ FIX 2: Safe useEffect with optional chaining
   useEffect(() => {
-    if (coupone.couponApplied || coupone.error) {
+    // ✅ Use optional chaining + nullish coalescing
+    if (couponState?.couponApplied || couponState?.error) {
       setOpenSnackbar(true);
-      if (coupone.couponApplied) {
+      if (couponState?.couponApplied) {
         setCouponCode("");
       }
     }
-  }, [coupone.couponApplied, coupone.error]);
+  }, [couponState?.couponApplied, couponState?.error]); // ✅ Safe deps
 
-  // ✅ SAFE: Always fallback to empty array
+  // ✅ FIX 3: Safe cart items fallback
   const cartItems = cart?.cart?.cartItems || [];
+  
+  console.log('🔍 Cart items debug:', cartItems.map(item => ({
+  _id: item._id,
+  title: item.product?.title,
+  hasId: !!item._id,
+  type: typeof item._id
+})));
 
   return (
     <>
@@ -74,10 +91,16 @@ const Cart = () => {
         <div className="pt-10 px-5 sm:px-10 md:px-60 lg:px-60 min-h-screen">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 space-y-3">
-              {cartItems.map((item: CartItem) => (
-                <CartItemCard key={item._id} item={item} />
-              ))}
-            </div>
+            {/* ✅ FIX: Use fallback key if _id is missing */}
+            {cartItems.map((item: CartItem, index: number) => {
+              // ✅ Generate unique key: prefer _id, fallback to index + productId
+              const uniqueKey = item._id 
+                ? String(item._id) 
+                : `cart-item-${index}-${item.product?._id || 'unknown'}`;
+              
+              return <CartItemCard key={uniqueKey} item={item} />;
+            })}
+          </div>
 
             <div className="col-span-1 text-sm space-y-3">
               <div className="border rounded-md px-5 py-3 space-y-5">
@@ -86,6 +109,7 @@ const Cart = () => {
                   <span>Apply Coupons</span>
                 </div>
 
+                {/* ✅ FIX 4: Safe coupon code check */}
                 {!cart.cart?.couponCode ? (
                   <div className="flex justify-between items-center">
                     <TextField
@@ -130,11 +154,6 @@ const Cart = () => {
                   </Button>
                 </div>
               </section>
-
-              {/* <div className="border rounded-md px-5 py-4 flex justify-between items-center cursor-pointer">
-                <span>Add From Wishlist</span>
-                <FavoriteIcon sx={{ color: teal[600], fontSize: "21px" }} />
-              </div> */}
             </div>
           </div>
         </div>
@@ -152,6 +171,7 @@ const Cart = () => {
         </div>
       )}
 
+      {/* ✅ FIX 5: Safe snackbar with optional chaining */}
       <Snackbar
         anchorOrigin={{ vertical: "top", horizontal: "right" }}
         open={snackbarOpen}
@@ -160,11 +180,11 @@ const Cart = () => {
       >
         <Alert
           onClose={handleCloseSnackbar}
-          severity={coupone.error ? "error" : "success"}
+          severity={couponState?.error ? "error" : "success"}
           variant="filled"
           sx={{ width: "100%" }}
         >
-          {coupone.error ? coupone.error : "Coupon applied successfully"}
+          {couponState?.error || "Coupon applied successfully"}
         </Alert>
       </Snackbar>
     </>

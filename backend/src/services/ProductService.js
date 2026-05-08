@@ -2,20 +2,30 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
 const ProductError = require("../exceptions/ProductError");
-const mongoose = require("mongoose"); // ✅ Required for ObjectId in updateProduct
+const mongoose = require("mongoose");
 
 class ProductService {
 
-  // ✅ CREATE product with variants
+  async findProductById(productId) {
+    try {
+      const product = await Product.findById(productId);
+      if (!product) {
+        throw new Error("Product not found");
+      }
+      return product;
+    } catch (error) {
+      throw new Error(`Error finding product: ${error.message}`);
+    }
+  }
+
+  // ✅ CREATE product with variants (unchanged - already correct)
   async createProduct(req, seller) {
     try {
-      // Validate category is Level 3
       const category = await Category.findById(req.category);
       if (!category || category.level !== 3) {
         throw new ProductError("Valid Level 3 category is required");
       }
 
-      // ✅✅✅ FIX 1: Get category attributes ONCE (outside loop)
       const CategoryAttribute = mongoose.model('CategoryAttribute');
       const categoryAttrs = await CategoryAttribute.find({
         categoryId: category.categoryId,
@@ -30,31 +40,25 @@ class ProductService {
         .filter(attr => attr.displayInHighlights && !attr.isVariantField)
         .map(attr => attr.name.toLowerCase());
 
-      // ✅ Process variants: handle offers array + legacy compatibility
       const processedVariants = await Promise.all(
         req.variants.map(async (variant, index) => {
-          // Auto-generate SKU if not provided
           if (!variant.sku) {
             const slug = req.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
             variant.sku = `${slug}-${variant.color.toLowerCase()}-${index + 1}`.substring(0, 100);
           }
 
-          // Ensure images array is valid
           if (!variant.images || variant.images.length === 0) {
             throw new ProductError(`Variant ${index + 1}: At least one image required`);
           }
 
-          // ✅✅✅ Handle offers array (multi-seller) OR legacy direct fields
           let finalOffers = variant.offers;
 
-          // If no offers array, convert legacy direct fields to offers array
           if (!finalOffers || !Array.isArray(finalOffers) || finalOffers.length === 0) {
             if (variant.mrpPrice === undefined || variant.sellingPrice === undefined) {
               throw new ProductError(`Variant ${index + 1}: Either 'offers' array or 'mrpPrice/sellingPrice' fields are required`);
             }
-            // Convert legacy format to offers array
             finalOffers = [{
-              seller: seller._id,  // ✅ FIX: Use 'seller' (ObjectId) to match schema
+              seller: seller._id,
               mrpPrice: Number(variant.mrpPrice),
               sellingPrice: Number(variant.sellingPrice),
               stock: Number(variant.stock) || 0,
@@ -63,14 +67,11 @@ class ProductService {
             }];
           }
 
-          // ✅ Validate each offer in the array
           for (const [offerIdx, offer] of finalOffers.entries()) {
-            // ✅ FIX: Check 'seller' field (not sellerId)
             if (!offer.seller) {
               throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: seller is required`);
             }
 
-            // Validate and convert prices to numbers
             const mrpPrice = Number(offer.mrpPrice);
             const sellingPrice = Number(offer.sellingPrice);
             const stock = Number(offer.stock) || 0;
@@ -88,10 +89,9 @@ class ProductService {
               throw new ProductError(`Variant ${index + 1}, Offer ${offerIdx + 1}: Stock cannot be negative`);
             }
 
-            // Update offer with validated/converted values
             finalOffers[offerIdx] = {
               ...offer,
-              seller: offer.seller,  // ✅ Ensure seller is ObjectId
+              seller: offer.seller,
               mrpPrice,
               sellingPrice,
               stock,
@@ -101,41 +101,28 @@ class ProductService {
 
           let variantSpecs = {};
           if (variant.specifications && typeof variant.specifications === 'object') {
-            // ✅ Save all specs as strings (Mongoose Map requirement)
             Object.entries(variant.specifications).forEach(([key, value]) => {
               variantSpecs[key] = String(value);
             });
           }
 
-          // ✅ Log for debugging (remove after testing)
-          console.log('🔍 [Service] Saving variant specs:', {
-            originalCount: Object.keys(variant.specifications || {}).length,
-            savedCount: Object.keys(variantSpecs).length,
-            savedKeys: Object.keys(variantSpecs)
-          });
-
-          // ✅ Extract highlights for product-level storage
           const variantHighlights = {};
           if (req.highlights && typeof req.highlights === 'object') {
             Object.entries(req.highlights).forEach(([key, value]) => {
               const keyLower = key.toLowerCase();
-              // Only include if it's a valid highlight field
               if (highlightFieldNames.includes(keyLower)) {
                 variantHighlights[key] = value;
               }
             });
           }
 
-
-          // ✅ Return processed variant with filtered specs
           return {
             ...variant,
-            specifications: variantSpecs,  // ✅ ONLY variant-specific fields
+            specifications: variantSpecs,
             highlights: Object.keys(variantHighlights).length > 0 ? variantHighlights : undefined,
             isActive: variant.isActive !== false,
             offers: finalOffers,
-            variantOwner: seller._id,  // ✅ Set variantOwner BEFORE save
-            // Remove legacy direct fields
+            variantOwner: seller._id,
             mrpPrice: undefined,
             sellingPrice: undefined,
             stock: undefined
@@ -143,7 +130,6 @@ class ProductService {
         })
       );
 
-      // ✅✅✅ FIX 3: Collect highlights from ALL variants (or just first one)
       const productHighlights = {};
       for (const variant of processedVariants) {
         if (variant.highlights) {
@@ -151,7 +137,6 @@ class ProductService {
         }
       }
 
-      // ✅ Create product with embedded variants (now with offers array)
       const product = new Product({
         title: req.title.trim(),
         description: req.description.trim(),
@@ -165,10 +150,8 @@ class ProductService {
         isActive: req.isActive !== false
       });
 
-      // ✅✅✅ FIX 4: Save ONCE (pre-save hook will handle aggregated fields + ownership)
       await product.save();
 
-      // ✅ Populate and return with seller info
       return await Product.findById(product._id).populate('seller', 'sellerName businessDetails.businessName');
 
     } catch (error) {
@@ -197,48 +180,22 @@ class ProductService {
     }
   }
 
+  // ✅ UPDATE PRODUCT (unchanged - already correct)
   async updateProduct(productId, updates, sellerId) {
-    console.log('🔍 [DEBUG] updateProduct called:', {
-      productId,
-      sellerId,
-      updatesReceived: {
-        variantsCount: updates.variants?.length,
-        firstVariant: updates.variants?.[0] ? {
-          color: updates.variants[0].color,
-          offersCount: updates.variants[0].offers?.length,
-          firstOffer: updates.variants[0].offers?.[0] ? {
-            _id: updates.variants[0].offers[0]._id,
-            seller: updates.variants[0].offers[0].seller,
-            stock: updates.variants[0].offers[0].stock
-          } : null
-        } : null
-      }
-    });
-
     try {
-      // ✅ 1. Fetch product with full details
       const product = await Product.findById(productId)
         .populate('variants.offers.seller', 'sellerName businessDetails.businessName');
-
-      console.log('🔍 [DEBUG] Product fetched:', {
-        found: !!product,
-        variantsCount: product?.variants?.length,
-        firstVariantOffers: product?.variants?.[0]?.offers?.length
-      });
 
       if (!product) {
         console.error('❌ [DEBUG] Product not found');
         throw new ProductError("Product not found");
       }
 
-      // ✅ 2. Authorization check
       const sellerHasOffer = product.variants.some(v =>
         v.offers?.some(o => {
-          // ✅ Handle both populated seller object AND string/ObjectId seller
           const offerSellerId = typeof o.seller === 'string'
             ? o.seller
             : o.seller?._id?.toString() || o.seller?.toString();
-
           return offerSellerId === sellerId.toString() && o.isActive !== false;
         })
       );
@@ -247,30 +204,15 @@ class ProductService {
         ? product.seller === sellerId.toString()
         : product.seller?._id?.toString() === sellerId.toString();
 
-      console.log('🔍 [DEBUG] Authorization:', {
-        sellerHasOffer,
-        isProductOwner,
-        productSeller: product.seller?.toString(),
-        requestSeller: sellerId
-      });
-
       if (!sellerHasOffer && !isProductOwner) {
         console.error('❌ [DEBUG] Access denied');
         throw new ProductError("Access denied: You don't have offers in this product");
       }
 
-      // ✅ 3. Build update operations
       const updateOps = [];
 
-      // ✅ 4. Handle variant updates
       if (updates.variants && Array.isArray(updates.variants)) {
         for (const updateVar of updates.variants) {
-          console.log('🔍 [DEBUG] Processing variant update:', {
-            updateVarId: updateVar._id,
-            updateVarColor: updateVar.color
-          });
-
-          // Find existing variant
           const existingVariant = product.variants.find(v => v._id.toString() === updateVar._id);
           console.log('🔍 [DEBUG] Found existing variant:', {
             found: !!existingVariant,
@@ -283,7 +225,6 @@ class ProductService {
             continue;
           }
 
-          // ✅ Process offers
           if (updateVar.offers && Array.isArray(updateVar.offers)) {
             for (const offerUpdate of updateVar.offers) {
               console.log('🔍 [DEBUG] Processing offer update:', {
@@ -292,12 +233,10 @@ class ProductService {
                 offerUpdateStock: offerUpdate.stock
               });
 
-              // Find existing offer by _id
               let existingOffer = existingVariant.offers?.find(
                 o => o._id?.toString() === offerUpdate._id?.toString()
               );
 
-              // Fallback: find by seller if _id missing
               if (!existingOffer && !offerUpdate._id) {
                 existingOffer = existingVariant.offers?.find(
                   o => o.seller?.toString() === sellerId.toString()
@@ -329,7 +268,6 @@ class ProductService {
                 continue;
               }
 
-              // ✅ Build update
               const offerUpdates = {};
               if (offerUpdate.mrpPrice !== undefined) offerUpdates['variants.$[v].offers.$[o].mrpPrice'] = offerUpdate.mrpPrice;
               if (offerUpdate.sellingPrice !== undefined) offerUpdates['variants.$[v].offers.$[o].sellingPrice'] = offerUpdate.sellingPrice;
@@ -341,7 +279,6 @@ class ProductService {
               console.log('🔍 [DEBUG] Offer updates to apply:', offerUpdates);
 
               if (Object.keys(offerUpdates).length > 0) {
-                // ✅ Execute update
                 const result = await Product.updateOne(
                   {
                     _id: productId,
@@ -358,14 +295,7 @@ class ProductService {
                   }
                 );
 
-                console.log('✅ [DEBUG] MongoDB update result:', {
-                  matchedCount: result.matchedCount,
-                  modifiedCount: result.modifiedCount,
-                  acknowledged: result.acknowledged
-                });
-
                 if (result.modifiedCount === 0) {
-                  console.error('❌ [DEBUG] Update matched but modified 0 documents!');
                   console.error('🔍 [DEBUG] Query filters:', {
                     productId,
                     variantId: updateVar._id,
@@ -377,23 +307,16 @@ class ProductService {
           }
 
           const variantLevelUpdates = {};
-
-          // ✅ Update images if provided
           if (updateVar.images && Array.isArray(updateVar.images)) {
             variantLevelUpdates['variants.$[v].images'] = updateVar.images;
           }
-
-          // ✅ Update color if provided (optional)
           if (updateVar.color !== undefined) {
             variantLevelUpdates['variants.$[v].color'] = updateVar.color;
           }
-
-          // ✅ Update isActive if provided (optional)
           if (updateVar.isActive !== undefined) {
             variantLevelUpdates['variants.$[v].isActive'] = updateVar.isActive;
           }
 
-          // ✅ Execute variant-level updates if any
           if (Object.keys(variantLevelUpdates).length > 0) {
             await Product.updateOne(
               {
@@ -406,55 +329,43 @@ class ProductService {
                 runValidators: true
               }
             );
-
             console.log('✅ [DEBUG] Variant-level updates applied:', variantLevelUpdates);
           }
         }
       }
 
-     // ✅ CORRECT: Use for...of loop for async operations
-const topLevelFields = ['title', 'description', 'isActive', 'isFeatured'];
-const topLevelUpdates = {};
+      const topLevelFields = ['title', 'description', 'isActive', 'isFeatured'];
+      const topLevelUpdates = {};
 
-for (const field of topLevelFields) {
-  if (updates[field] !== undefined && updates[field] !== null) {
-    // ✅ If catalog product, only allow catalog owner to update these fields
-    if (product.catalog) {
-      const catalogProduct = await Product.findById(product.catalog).select('seller');
-      const isCatalogOwner = catalogProduct?.seller?.toString() === sellerId.toString();
-      
-      if (!isCatalogOwner) {
-        console.log(`🚫 [DEBUG] Skipping ${field} update: not catalog owner`);
-        continue;  // ✅ Use continue instead of return
+      for (const field of topLevelFields) {
+        if (updates[field] !== undefined && updates[field] !== null) {
+          if (product.catalog) {
+            const catalogProduct = await Product.findById(product.catalog).select('seller');
+            const isCatalogOwner = catalogProduct?.seller?.toString() === sellerId.toString();
+            if (!isCatalogOwner) {
+              console.log(`🚫 [DEBUG] Skipping ${field} update: not catalog owner`);
+              continue;
+            }
+          }
+          topLevelUpdates[field] = updates[field];
+        }
       }
-    }
-    topLevelUpdates[field] = updates[field];
-  }
-}
 
-// ✅ Execute top-level fields update if there are changes
-if (Object.keys(topLevelUpdates).length > 0) {
-  await Product.updateOne(
-    { _id: productId },
-    { $set: { ...topLevelUpdates, updatedAt: new Date() } },
-    { runValidators: true }
-  );
-  console.log('✅ [DEBUG] Top-level updates applied:', topLevelUpdates);
-}
+      if (Object.keys(topLevelUpdates).length > 0) {
+        await Product.updateOne(
+          { _id: productId },
+          { $set: { ...topLevelUpdates, updatedAt: new Date() } },
+          { runValidators: true }
+        );
+        console.log('✅ [DEBUG] Top-level updates applied:', topLevelUpdates);
+      }
 
-      // ✅ 5. Recalculate aggregated fields
       await Product.updateCatalogPrices(productId);
       console.log('✅ [DEBUG] Recalculated catalog prices');
 
-      // ✅ 6. Fetch and return updated product
       const updatedProduct = await Product.findById(productId)
         .populate('seller', 'sellerName businessDetails.businessName')
         .populate('variants.offers.seller', 'sellerName businessDetails.businessName');
-
-      console.log('✅ [DEBUG] Returning updated product:', {
-        variantsCount: updatedProduct?.variants?.length,
-        blackVariant6GB: updatedProduct?.variants?.find(v => v.color === 'Black' && v.specifications?.storage === '256 GB')?.offers?.[0]?.stock
-      });
 
       return updatedProduct;
 
@@ -467,49 +378,128 @@ if (Object.keys(topLevelUpdates).length > 0) {
       throw new ProductError(error.message || "Failed to update product");
     }
   }
-  // ✅ GET product with color/variant filtering
+
+  // ✅ GET product with color/variant filtering + location support
   async getProductById(productId, filters = {}) {
     try {
-      const { color, specs } = filters;
+      const { color, specs, location } = filters;
 
+      // ✅ ADD 'location' and 'district' to populate
       const product = await Product.findById(productId)
-        .populate('seller', 'sellerName businessDetails.businessName')
+        .populate('seller', 'sellerName businessDetails.businessName district location')
         .populate('category', 'name categoryId level')
-         .populate('variants.offers.seller', 'sellerName businessDetails.businessName'); 
+        .populate('variants.offers.seller', 'sellerName businessDetails.businessName district location');
 
       if (!product || !product.isActive) {
         throw new ProductError("Product not found");
       }
 
-      // ✅ Filter variants by color if requested
-      let variants = product.activeVariants;
+      // ✅ Use product.variants (NOT activeVariants)
+      let variants = product.variants || [];
+
+      // Filter by color if provided
       if (color) {
         variants = variants.filter(v =>
-          v.color.toLowerCase() === color.toLowerCase()
+          v.color?.toLowerCase() === color.toLowerCase() && v.isActive !== false
         );
       }
 
-      // ✅ Filter by specifications if requested
+      // Filter by specs if provided
       if (specs && typeof specs === 'object') {
-        Object.entries(specs).forEach(([key, value]) => {
-          variants = variants.filter(v =>
-            v.specifications?.[key]?.toLowerCase() === String(value).toLowerCase()
-          );
+        const locationKeys = ['userLat', 'userLng', 'radiusKm', 'district'];
+        const validSpecs = Object.fromEntries(
+          Object.entries(specs).filter(([key]) => !locationKeys.includes(key))
+        );
+
+        if (Object.keys(validSpecs).length > 0) {
+          Object.entries(validSpecs).forEach(([key, value]) => {
+            variants = variants.filter(v =>
+              v.specifications?.[key]?.toLowerCase() === String(value).toLowerCase()
+            );
+          });
+        }
+      }
+
+      console.log('🔍 [DEBUG] Raw variants count:', variants.length);
+      if (variants.length > 0) {
+        const firstVariant = variants[0];
+        console.log('🔍 [DEBUG] First variant type:', typeof firstVariant);
+        console.log('🔍 [DEBUG] First variant specifications type:', typeof firstVariant.specifications, firstVariant.specifications?.constructor?.name);
+        console.log('🔍 [DEBUG] First variant specifications content:',
+          firstVariant.specifications instanceof Map
+            ? Object.fromEntries(firstVariant.specifications)
+            : firstVariant.specifications
+        );
+      }
+
+      // ✅ Process variants with location (PRESERVE specifications)
+      if (location?.type === 'current' && location.coordinates) {
+        const { lat, lng } = location.coordinates;
+
+        variants = variants.map(variant => {
+          // ✅ Convert Mongoose document to plain object WITH proper Map handling
+          const variantObj = variant.toObject
+            ? variant.toObject({
+              getters: true,
+              virtuals: false,
+              // ✅ Ensure Maps are converted to plain objects
+              flattenMaps: true
+            })
+            : { ...variant };
+
+          if (variant.offers && Array.isArray(variant.offers)) {
+            const offersWithDistance = variant.offers.map(offer => {
+              const seller = offer.seller;
+              let distance = null;
+
+              if (seller?.location?.coordinates?.[0] && seller?.location?.coordinates?.[1]) {
+                const sellerLng = seller.location.coordinates[0];
+                const sellerLat = seller.location.coordinates[1];
+                distance = _calculateDistance(lat, lng, sellerLat, sellerLng);
+              }
+
+              // ✅ Also flatten Maps in offers
+              const offerObj = offer.toObject
+                ? offer.toObject({ flattenMaps: true })
+                : { ...offer };
+
+              return {
+                ...offerObj,
+                distance: distance !== null ? Math.round(distance * 10) / 10 : null
+              };
+            });
+
+            // Sort offers by distance
+            offersWithDistance.sort((a, b) => {
+              if (a.distance === null && b.distance === null) return 0;
+              if (a.distance === null) return 1;
+              if (b.distance === null) return -1;
+              return a.distance - b.distance;
+            });
+
+            // ✅ CRITICAL: Spread variantObj FIRST (with flattened Maps), then override offers
+            return {
+              ...variantObj,
+              offers: offersWithDistance
+            };
+          }
+
+          // ✅ Return variant as-is if no offers (but ensure Maps are flattened)
+          return variantObj;
         });
       }
 
-      // ✅ Return product with filtered variants
+      // ✅ Return product with variants
+      const productObj = product.toObject();
+
       return {
-        ...product.toObject(),
-        variants,  // Override with filtered list
-        // Include helper data for frontend
+        ...productObj,
+        variants: variants,  // ✅ Return in 'variants' field
+        activeVariants: undefined,
         meta: {
-          availableColors: product.uniqueColors,
+          availableColors: product.uniqueColors || [],
           availableSpecs: Object.fromEntries(product.availableSpecs || {}),
-          priceRange: {
-            min: product.minPrice,
-            max: product.maxPrice
-          }
+          priceRange: { min: product.minPrice, max: product.maxPrice }
         }
       };
 
@@ -519,27 +509,235 @@ if (Object.keys(topLevelUpdates).length > 0) {
     }
   }
 
-  // ✅ SEARCH products with variant filters
+  // ✅✅✅ FULLY FIXED: searchProducts with location + district support
   async searchProducts(filters) {
     try {
-      return await Product.searchWithVariants(filters);
+      const {
+        search, category, colors, specs,
+        minPrice, maxPrice, minDiscount,
+        sortBy = 'newest', page = 0, limit = 20,
+        location, district  // ✅ Extract district parameter
+      } = filters;
+
+      const safeLimit = Math.min(parseInt(limit) || 20, 100);
+      const aggregationPipeline = [];
+      const searchConditions = [];
+
+      // ✅ Build search conditions
+      if (search && search.trim()) {
+        const searchTerm = search.trim();
+        const regexPattern = new RegExp(
+          searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+          'i'
+        );
+
+        searchConditions.push(
+          { title: { $regex: regexPattern } },
+          { description: { $regex: regexPattern } },
+          { slug: { $regex: regexPattern } },
+          { sellerBusinessName: { $regex: regexPattern } },
+          { categoryName: { $regex: regexPattern } },
+          { categorySlug: { $regex: regexPattern } },
+          { 'variants.color': { $regex: regexPattern } },
+          { 'variants.specifications': { $regex: regexPattern } },
+          { availableColors: { $regex: regexPattern } }
+        );
+      }
+
+      // ✅ Base match: isActive = true (NO district filter here yet)
+      const baseMatch = { isActive: true };
+
+      if (category) {
+        if (mongoose.Types.ObjectId.isValid(category)) {
+          baseMatch.category = new mongoose.Types.ObjectId(category);
+        } else {
+          try {
+            const Category = mongoose.model('Category');
+            const catDoc = await Category.findOne({ categoryId: category, level: 3 });
+            if (catDoc) baseMatch.category = catDoc._id;
+          } catch (err) {
+            console.warn('⚠️ Category slug resolution failed:', err.message);
+          }
+        }
+      }
+
+      aggregationPipeline.push({ $match: baseMatch });
+
+      // ✅ Apply search conditions
+      if (searchConditions.length > 0) {
+        aggregationPipeline.push({ $match: { $or: searchConditions } });
+      }
+
+      // ✅ Price filters
+      if (minPrice !== undefined || maxPrice !== undefined) {
+        const priceMatch = {};
+        if (minPrice !== undefined) priceMatch.$gte = minPrice;
+        if (maxPrice !== undefined) priceMatch.$lte = maxPrice;
+        aggregationPipeline.push({ $match: { minPrice: priceMatch } });
+      }
+
+      // ✅ Variant color filter
+      if (colors?.length > 0) {
+        aggregationPipeline.push({
+          $match: {
+            'variants.color': { $in: colors.map(c => new RegExp(`^${c}$`, 'i')) },
+            'variants.isActive': true
+          }
+        });
+      }
+
+      // ✅ Dynamic spec filters
+      if (specs && typeof specs === 'object') {
+        Object.entries(specs).forEach(([key, values]) => {
+          if (Array.isArray(values) && values.length > 0) {
+            const stringValues = values.map(v => String(v).trim()).filter(Boolean);
+            if (stringValues.length > 0) {
+              aggregationPipeline.push({
+                $match: { [`variants.specifications.${key}`]: { $in: stringValues } }
+              });
+            }
+          }
+        });
+      }
+
+      // ✅ Filter to only include products with active variants AND active offers
+      aggregationPipeline.push({
+        $addFields: {
+          activeVariants: {
+            $filter: {
+              input: '$variants',
+              as: 'v',
+              cond: {
+                $and: [
+                  '$$v.isActive',
+                  { $gt: [{ $size: { $ifNull: ['$$v.offers', []] } }, 0] }
+                ]
+              }
+            }
+          }
+        }
+      });
+      aggregationPipeline.push({
+        $match: { activeVariants: { $ne: [], $exists: true } }
+      });
+
+      // ✅ Sort options
+      const sortOptions = {
+        'price_low': { minPrice: 1 },
+        'price_high': { minPrice: -1 },
+        'newest': { createdAt: -1 },
+        'rating': { averageRating: -1, createdAt: -1 },
+        'relevance': { createdAt: -1 },
+        'distance': { distance: 1 }
+      };
+      const effectiveSortBy = location?.type === 'current' ? 'distance' : sortBy;
+      const selectedSort = sortOptions[effectiveSortBy] || sortOptions.newest;
+      aggregationPipeline.push({ $sort: selectedSort });
+
+      // ✅ Pagination
+      aggregationPipeline.push({ $skip: page * safeLimit }, { $limit: safeLimit });
+
+      // ✅ Populate seller (include district for post-filtering)
+      aggregationPipeline.push({
+        $lookup: {
+          from: 'sellers',
+          localField: 'variants.offers.seller',  // ✅ Match on offers.seller
+          foreignField: '_id',
+          as: 'offerSellers'
+        }
+      });
+
+      // ✅ Also populate product-level seller
+      aggregationPipeline.push({
+        $lookup: {
+          from: 'sellers',
+          localField: 'seller',
+          foreignField: '_id',
+          as: 'productSeller',
+          pipeline: [{ $project: { sellerName: 1, businessDetails: 1, email: 1, mobile: 1, district: 1, location: 1 } }]
+        }
+      });
+      aggregationPipeline.push({ $unwind: { path: '$productSeller', preserveNullAndEmptyArrays: true } });
+
+      // ✅ Populate category
+      aggregationPipeline.push({
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'category',
+          pipeline: [{ $project: { name: 1, categoryId: 1, level: 1, image: 1 } }]
+        }
+      });
+      aggregationPipeline.push({ $unwind: { path: '$category', preserveNullAndEmptyArrays: true } });
+
+      console.log('🔍 [MONGO] Search pipeline stages:', aggregationPipeline.length);
+      let products = await Product.aggregate(aggregationPipeline);
+      console.log(`✅ [MONGO] Found ${products.length} products before district filter`);
+
+      // ✅✅✅ POST-PROCESS: Filter by district AFTER population
+      if (district && typeof district === 'string' && district.trim()) {
+        const targetDistrict = district.trim();
+
+        products = products.filter(product => {
+          // Check if product has ANY variant with an offer from a seller in this district
+          const hasMatchingOffer = product.variants?.some(variant => {
+            return variant.offers?.some(offer => {
+              // Check populated seller data
+              const sellerDistrict = offer.seller?.district ||
+                product.offerSellers?.find(s =>
+                  s._id?.toString() === offer.seller?.toString() ||
+                  s._id?.toString() === offer.seller?._id?.toString()
+                )?.district;
+              return sellerDistrict === targetDistrict;
+            });
+          });
+
+          return hasMatchingOffer;
+        });
+
+        console.log(`🏙️ [Service] Filtered from ${products.length} to ${products.filter(p => p.variants?.some(v => v.offers?.length > 0)).length} products for district: ${targetDistrict}`);
+      }
+
+      // ✅ Format distance if location search was used
+      if (location?.type === 'current' && Array.isArray(products)) {
+        products = products.map(product => {
+          const productObj = product.toObject?.() || product;
+          if (typeof productObj.distance === 'number') {
+            productObj.distance = Math.round(productObj.distance * 10) / 10;
+          }
+          return productObj;
+        });
+      }
+
+      // ✅ Convert Mongoose docs to plain objects
+      return products.map(p => {
+        const obj = p.toObject?.() || p;
+        // Clean up helper fields
+        delete obj.offerSellers;
+        delete obj.productSeller;
+        return obj;
+      });
+
     } catch (error) {
-      console.error("❌ Search products error:", error.message);
+      console.error("❌ Search products service error:", {
+        message: error.message,
+        stack: error.stack,
+        filters: filters
+      });
       throw new ProductError(error.message || "Search failed");
     }
   }
 
-  // ✅ GET seller's products - FIXED: Complete field projection for ProductTable
+  // ✅ GET seller's products (unchanged)
   async getSellerProducts(sellerId, page = 0, limit = 20) {
     try {
-      // ✅ Query for products
       const products = await Product.find({ seller: sellerId, isActive: true })
         .populate('seller', 'sellerName businessDetails.businessName')
         .populate('variants.offers.seller', 'sellerName businessDetails.businessName')
         .populate('category', 'name categoryId level')
         .lean();
 
-      // ✅ Transform to ensure specifications are plain objects
       const transformedProducts = products.map(product => {
         if (product.variants && Array.isArray(product.variants)) {
           product.variants = product.variants.map(variant => {
@@ -558,7 +756,6 @@ if (Object.keys(topLevelUpdates).length > 0) {
         return product;
       });
 
-      // ✅✅✅ ADD THIS: Get total count for pagination
       const total = await Product.countDocuments({ seller: sellerId, isActive: true });
 
       return {
@@ -566,7 +763,7 @@ if (Object.keys(topLevelUpdates).length > 0) {
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total,  // ✅ Now defined!
+          total,
           totalPages: Math.ceil(total / parseInt(limit))
         }
       };
@@ -576,7 +773,7 @@ if (Object.keys(topLevelUpdates).length > 0) {
     }
   }
 
-  // ✅ DELETE product (soft delete)
+  // ✅ DELETE product (soft delete) (unchanged)
   async deleteProduct(productId, sellerId) {
     try {
       const product = await Product.findOne({ _id: productId, seller: sellerId });
@@ -584,7 +781,6 @@ if (Object.keys(topLevelUpdates).length > 0) {
         throw new ProductError("Product not found or access denied");
       }
 
-      // Soft delete: set isActive = false
       product.isActive = false;
       if (product.variants && Array.isArray(product.variants)) {
         product.variants.forEach(v => {
@@ -605,3 +801,15 @@ if (Object.keys(topLevelUpdates).length > 0) {
 }
 
 module.exports = new ProductService();
+
+function _calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}

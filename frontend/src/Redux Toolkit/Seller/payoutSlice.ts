@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Seller\payoutSlice.ts
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { type Payouts } from "../../types/payoutsType";
 import { api } from "../../Config/Api";

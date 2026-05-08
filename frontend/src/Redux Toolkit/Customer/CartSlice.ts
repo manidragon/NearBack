@@ -7,7 +7,6 @@ import { applyCoupon } from "./CouponSlice";
 import { sumCartItemMrpPrice, sumCartItemSellingPrice } from "../../util/cartCalculator";
 import { createSelector } from '@reduxjs/toolkit';
 
-
 // ✅ Define a safe empty cart structure
 const emptyCart: Cart = {
   _id: null,
@@ -24,7 +23,7 @@ const emptyCart: Cart = {
 };
 
 interface CartState {
-  cart: Cart; // ✅ Now always a Cart object, never null
+  cart: Cart; // ✅ Always a Cart object, never null
   loading: boolean;
   error: string | null;
 }
@@ -37,6 +36,10 @@ const initialState: CartState = {
 };
 
 const API_URL = "/api/cart";
+
+// ============================================================================
+// ✅ ASYNC THUNKS
+// ============================================================================
 
 export const fetchUserCart = createAsyncThunk<Cart, string>(
   "cart/fetchUserCart",
@@ -56,6 +59,11 @@ interface AddItemRequest {
   productId: string;
   size: string;
   quantity: number;
+  variantId?: string;
+  sellerId?: string;
+  offerId?: string;
+  color?: string;
+  specifications?: Record<string, string>;
 }
 
 export const addItemToCart = createAsyncThunk<
@@ -88,8 +96,9 @@ export const deleteCartItem = createAsyncThunk<
   }
 });
 
+// ✅ FIX: Update return type to handle both CartItem and { updatedCartItem: CartItem }
 export const updateCartItem = createAsyncThunk<
-  CartItem,
+  CartItem | { updatedCartItem: CartItem },
   { jwt: string; cartItemId: string; cartItem: { quantity: number } }
 >(
   "cart/updateCartItem",
@@ -102,7 +111,11 @@ export const updateCartItem = createAsyncThunk<
           headers: { Authorization: `Bearer ${jwt}` },
         }
       );
-      return response.data;
+      
+      // ✅ Handle both response formats:
+      // Format 1: { success: true, updatedCartItem: {...} }
+      // Format 2: Just the CartItem object
+      return response.data.updatedCartItem || response.data;
     } catch (error: any) {
       return rejectWithValue(
         error.response?.data?.message || "Failed to update cart item"
@@ -111,24 +124,52 @@ export const updateCartItem = createAsyncThunk<
   }
 );
 
+// ============================================================================
+// ✅ SELECTORS
+// ============================================================================
+
 export const selectCartItemCount = createSelector(
   (state: RootState) => state.cart.cart,
   (cart) => cart?.cartItems?.length ?? 0
 );
+
+export const selectCartTotalItems = createSelector(
+  (state: RootState) => state.cart.cart,
+  (cart) => cart?.totalItem ?? 0
+);
+
+export const selectCartTotalPrice = createSelector(
+  (state: RootState) => state.cart.cart,
+  (cart) => cart?.totalSellingPrice ?? 0
+);
+
+// ============================================================================
+// ✅ SLICE
+// ============================================================================
 
 const cartSlice = createSlice({
   name: "cart",
   initialState,
   reducers: {
     resetCartState: (state) => {
-      // ✅ Reset to emptyCart, not null
       state.cart = emptyCart;
       state.loading = false;
       state.error = null;
     },
+    // ✅ Optional: Clear cart after successful order
+    clearCartAfterOrder: (state) => {
+      state.cart = {
+        ...emptyCart,
+        _id: state.cart._id, // Keep cart ID if needed
+        user: state.cart.user,
+      };
+    },
   },
   extraReducers: (builder) => {
     builder
+      // ======================================================================
+      // FETCH CART
+      // ======================================================================
       .addCase(fetchUserCart.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -140,16 +181,17 @@ const cartSlice = createSlice({
       .addCase(fetchUserCart.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
-        // Optional: keep emptyCart on error instead of leaving stale data
-        // state.cart = emptyCart;
       })
+
+      // ======================================================================
+      // ADD ITEM TO CART
+      // ======================================================================
       .addCase(addItemToCart.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
       .addCase(addItemToCart.fulfilled, (state, action: PayloadAction<Cart>) => {
-        console.log('✅ Cart updated:', action.payload);
-        console.log('✅ New cart items count:', action.payload.cartItems?.length);
+        // ✅ Replace entire cart with fresh data from server
         state.cart = action.payload;
         state.loading = false;
       })
@@ -157,56 +199,105 @@ const cartSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+
+      // ======================================================================
+      // DELETE CART ITEM
+      // ======================================================================
       .addCase(deleteCartItem.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(deleteCartItem.fulfilled, (state, action) => {
-        // ✅ Safe: cart is always defined
+      .addCase(deleteCartItem.fulfilled, (state, action: PayloadAction<{ cartItemId: string }>) => {
+        // ✅ Filter out deleted item
         state.cart.cartItems = state.cart.cartItems.filter(
           (item: CartItem) => item._id !== action.payload.cartItemId
         );
-        const mrpPrice = sumCartItemMrpPrice(state.cart.cartItems);
-        const sellingPrice = sumCartItemSellingPrice(state.cart.cartItems);
-        state.cart.totalSellingPrice = sellingPrice;
-        state.cart.totalMrpPrice = mrpPrice;
+        
+        // ✅ Recalculate totals using helper functions
+        state.cart.totalMrpPrice = sumCartItemMrpPrice(state.cart.cartItems);
+        state.cart.totalSellingPrice = sumCartItemSellingPrice(state.cart.cartItems);
+        state.cart.totalItem = state.cart.cartItems.reduce(
+          (sum, item) => sum + (item.quantity || 0), 0
+        );
+        state.cart.discount = state.cart.totalMrpPrice > 0
+          ? Math.round(((state.cart.totalMrpPrice - state.cart.totalSellingPrice) / state.cart.totalMrpPrice) * 100)
+          : 0;
+        
         state.loading = false;
       })
       .addCase(deleteCartItem.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       })
+
+      // ======================================================================
+      // ✅ UPDATE CART ITEM - CRITICAL FIX
+      // ======================================================================
       .addCase(updateCartItem.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
       .addCase(updateCartItem.fulfilled, (state, action) => {
+        // ✅ Extract updated item from response (handle both formats)
+        const updatedItem: CartItem = 
+          'updatedCartItem' in action.payload 
+            ? action.payload.updatedCartItem 
+            : action.payload;
+        
+        // ✅ Find and update the item in cart
         const index = state.cart.cartItems.findIndex(
           (item: CartItem) => item._id === action.meta.arg.cartItemId
         );
-        if (index !== -1) {
-          state.cart.cartItems[index] = action.payload;
+        
+        if (index !== -1 && updatedItem) {
+          // ✅ Replace with fully populated updated item
+          state.cart.cartItems[index] = {
+            ...state.cart.cartItems[index],
+            ...updatedItem,
+            // Ensure critical fields are preserved
+            _id: updatedItem._id || state.cart.cartItems[index]._id,
+            quantity: updatedItem.quantity ?? state.cart.cartItems[index].quantity,
+            mrpPrice: updatedItem.mrpPrice ?? state.cart.cartItems[index].mrpPrice,
+            sellingPrice: updatedItem.sellingPrice ?? state.cart.cartItems[index].sellingPrice,
+          };
         }
-        const mrpPrice = sumCartItemMrpPrice(state.cart.cartItems);
-        const sellingPrice = sumCartItemSellingPrice(state.cart.cartItems);
-        state.cart.totalSellingPrice = sellingPrice;
-        state.cart.totalMrpPrice = mrpPrice;
+        
+        // ✅ Recalculate ALL cart totals
+        state.cart.totalMrpPrice = sumCartItemMrpPrice(state.cart.cartItems);
+        state.cart.totalSellingPrice = sumCartItemSellingPrice(state.cart.cartItems);
+        state.cart.totalItem = state.cart.cartItems.reduce(
+          (sum, item) => sum + (item.quantity || 0), 0
+        );
+        state.cart.discount = state.cart.totalMrpPrice > 0
+          ? Math.round(((state.cart.totalMrpPrice - state.cart.totalSellingPrice) / state.cart.totalMrpPrice) * 100)
+          : 0;
+        
         state.loading = false;
       })
       .addCase(updateCartItem.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       })
-      .addCase(applyCoupon.fulfilled, (state, action) => {
+
+      // ======================================================================
+      // APPLY COUPON (handled by CouponSlice, but updates cart)
+      // ======================================================================
+      .addCase(applyCoupon.fulfilled, (state, action: PayloadAction<Cart>) => {
         state.cart = action.payload;
         state.loading = false;
       });
   },
 });
 
+// ============================================================================
+// ✅ EXPORTS
+// ============================================================================
+
 export default cartSlice.reducer;
-export const { resetCartState } = cartSlice.actions;
+export const { resetCartState, clearCartAfterOrder } = cartSlice.actions;
 
 export const selectCart = (state: RootState) => state.cart.cart;
 export const selectCartLoading = (state: RootState) => state.cart.loading;
 export const selectCartError = (state: RootState) => state.cart.error;
+export const selectCartItems = (state: RootState) => state.cart.cart.cartItems;
+export const selectCartCoupon = (state: RootState) => state.cart.cart.couponCode;

@@ -1,10 +1,7 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\BecomeSeller\BecomeSellerFormStep1.tsx
 import { Box, TextField } from "@mui/material";
 
-
 const BecomeSellerFormStep1 = ({ formik }: any) => {
-
-
-
     return (
         <Box  >
             <p className="text-xl font-bold text-center pb-9">Contact Details</p>

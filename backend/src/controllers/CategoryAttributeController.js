@@ -56,10 +56,6 @@ class CategoryAttributeController {
       includeInactive === 'true'
     );
 
-    console.log('✅ [Backend] Found attributes:', attributes.length);
-
-    // ✅✅✅ CRITICAL FIX: Return array in "data" field (not "attributes")
-    // This matches your frontend interface: { success, count, data: CategoryAttribute[] }
     res.status(200).json({
       success: true,
       count: attributes.length,

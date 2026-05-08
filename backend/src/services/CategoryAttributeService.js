@@ -106,7 +106,6 @@ async getAttributesByCategory(categoryId, includeInactive = false) {
     const attributes = await CategoryAttribute.find(query)
       .sort({ sortOrder: 1, order: 1, name: 1 });
 
-    console.log('✅ [Service] Found attributes:', attributes.length);
     return attributes;
   } catch (error) {
     console.error('❌ [Service] Get attributes error:', error.message);

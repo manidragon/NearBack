@@ -34,7 +34,8 @@ import {
     selectCategoryAttributes,
     selectCategoryAttributesLoading
 } from '../../../../Redux Toolkit/Admin/CategoryAttributeSlice';
-import { api } from '../../../../Config/Api'; // ✅ ADD THIS IMPORT
+import { api } from '../../../../Config/Api';
+import { selectLocationFilter } from "../../../../Redux Toolkit/Customer/ProductSlice";
 
 const style = {
     position: 'absolute',
@@ -84,6 +85,8 @@ const ProductDetails = () => {
 
     // ✅ NEW: Get product reference (moved BEFORE useEffects that use it)
     const product = products.product;
+    const [selectedSize, setSelectedSize] = useState<string>('');
+    const locationFilter = useAppSelector(selectLocationFilter);
 
     const checkIsInOtherColors = (currentVariant: ProductVariant, currentColor: string): boolean => {
         if (!product?.variants) return false;
@@ -97,21 +100,8 @@ const ProductDetails = () => {
         );
     };
 
-    // ============================================
-    // ✅ NEW: Fetch All Seller Offers for the Selected Variant
-    // ============================================
-    // ✅ UPDATED: Fetch seller offers for BOTH catalog and independent products
     useEffect(() => {
-        console.log('🔍 [Seller Offers Check]', {
-            selectedVariantId,
-            productId: product?._id,
-            hasCatalog: !!product?.catalog?._id,
-            totalVariants: product?.variants?.length,
-            selectedVariant: product?.variants?.find(v => v._id === selectedVariantId)
-        });
-
         const fetchSellerOffers = async () => {
-            // Only fetch if we have a selected variant AND product
             if (!selectedVariantId || !product?._id) {
                 setSellerOffers([]);
                 setSelectedSellerOffer(null);
@@ -119,88 +109,95 @@ const ProductDetails = () => {
                 return;
             }
 
-            // ✅ Safe check: is this a catalog-linked product?
             const isCatalog = !!(product?.catalog && product.catalog._id);
             setIsCatalogProduct(isCatalog);
 
             try {
                 if (isCatalog && product.catalog?._id) {
-                    // Fetch from catalog endpoint
-                    const response = await api.get(`/api/catalog/${product.catalog._id}/offers`);
+                    // ✅ Build params with location/district
+                    const params: any = {};
+                    if (locationFilter?.type === 'current' && locationFilter.coordinates) {
+                        params.userLat = locationFilter.coordinates.lat;
+                        params.userLng = locationFilter.coordinates.lng;
+                        params.radiusKm = locationFilter.radiusKm || 50;
+                    } else if (locationFilter?.type === 'district' && locationFilter.district) {
+                        params.district = locationFilter.district;  // ✅ Pass district
+                    }
+
+                    const response = await api.get(`/api/catalog/${product.catalog._id}/offers`, { params });
 
                     if (response.data.success && response.data.data.offers?.length > 0) {
-                        const offersWithVariant = response.data.data.offers.filter((offer: any) =>
+                        let offersWithVariant = response.data.data.offers.filter((offer: any) =>
                             offer.variants?.some((v: any) => v._id === selectedVariantId && (v.stock ?? 0) > 0 && v.isActive !== false)
                         );
 
+                        // ✅ If district filter is active, further filter to only show sellers from that district
+                        if (locationFilter?.type === 'district' && locationFilter.district) {
+                            offersWithVariant = offersWithVariant.filter((offer: any) =>
+                                offer.seller?.district === locationFilter.district
+                            );
+                        }
+
                         setSellerOffers(offersWithVariant);
 
-                        // ✅ Declare lowestOffer BEFORE using it in console.log
-                        let lowestOffer: any = null;
                         if (offersWithVariant.length > 0) {
-                            lowestOffer = offersWithVariant.reduce((min: any, offer: any) => {
+                            let lowestOffer: any = offersWithVariant.reduce((min: any, offer: any) => {
                                 const variant = offer.variants.find((v: any) => v._id === selectedVariantId);
                                 const minVariant = min.variants.find((v: any) => v._id === selectedVariantId);
                                 return (variant?.sellingPrice ?? Infinity) < (minVariant?.sellingPrice ?? Infinity) ? offer : min;
                             });
                             setSelectedSellerOffer(lowestOffer);
                         }
-
-                        // ✅ Targeted debug log (now lowestOffer is defined)
-                        console.log('✅ [Seller Offers] Catalog offers loaded:', {
-                            count: offersWithVariant.length,
-                            selected: lowestOffer?.seller?.businessDetails?.businessName || lowestOffer?.seller?.sellerName
-                        });
                     }
                 } else {
                     // ✅ For independent products: extract offers directly from product.variants
                     const variant = product?.variants?.find((v: any) => v._id === selectedVariantId);
 
                     if (variant?.offers && variant.offers.length > 0) {
-                        const activeOffers = variant.offers.filter((o: any) =>
+                        let activeOffers = variant.offers.filter((o: any) =>
                             o.isActive !== false && (o.stock ?? 0) > 0
                         );
 
-                        const formattedOffers = activeOffers.map((offer: any) => {
-                            const sellerId = typeof offer.seller === 'string' ? offer.seller : offer.seller?._id;
+                        // ✅ Filter by district if district filter is active
+                        if (locationFilter?.type === 'district' && locationFilter.district) {
+                            activeOffers = activeOffers.filter((o: any) =>
+                                o.seller?.district === locationFilter.district
+                            );
+                        }
 
-                            return {
-                                _id: offer._id,
-                                seller: {
-                                    _id: sellerId,
-                                    // ✅ Backend now populates these; if not, they'll be undefined (fallback to 'Seller')
-                                    businessDetails: offer.seller?.businessDetails,
-                                    sellerName: offer.seller?.sellerName
-                                },
-                                variants: [{
-                                    _id: selectedVariantId,
-                                    ...variant,
-                                    sellingPrice: offer.sellingPrice,
-                                    mrpPrice: offer.mrpPrice,
-                                    stock: offer.stock
-                                }],
-                                minPrice: offer.sellingPrice,
-                                maxPrice: offer.sellingPrice
-                            };
-                        });
+                       const formattedOffers = activeOffers.map((offer: any) => {
+  const sellerId = typeof offer.seller === 'string' ? offer.seller : offer.seller?._id;
+
+  return {
+    _id: offer._id,
+    seller: {
+      _id: sellerId,
+      businessDetails: offer.seller?.businessDetails,
+      sellerName: offer.seller?.sellerName,
+      district: offer.seller?.district
+    },
+    variants: [{
+      _id: selectedVariantId,
+      ...variant,
+      sellingPrice: offer.sellingPrice,
+      mrpPrice: offer.mrpPrice,
+      stock: offer.stock
+    }],
+    minPrice: offer.sellingPrice,
+    maxPrice: offer.sellingPrice,
+    distance: offer.distance ?? null  // ✅ PRESERVE distance field
+  };
+});
 
                         setSellerOffers(formattedOffers);
 
-                        let lowest: any = null;
                         if (formattedOffers.length > 0) {
-                            lowest = formattedOffers.reduce((min: any, curr: any) =>
+                            let lowest: any = formattedOffers.reduce((min: any, curr: any) =>
                                 (curr.variants[0]?.sellingPrice ?? Infinity) < (min.variants[0]?.sellingPrice ?? Infinity)
                                     ? curr : min
                             );
                             setSelectedSellerOffer(lowest);
                         }
-
-                        console.log('✅ [Seller Offers] Independent product offers loaded:', {
-                            count: formattedOffers.length,
-                            sellers: formattedOffers.map(o => o.seller.businessDetails?.businessName || o.seller.sellerName)
-                        });
-                    } else {
-                        console.log('⚠️ [Seller Offers] No offers found for variant:', selectedVariantId);
                     }
                 }
             } catch (error) {
@@ -210,7 +207,7 @@ const ProductDetails = () => {
         };
 
         fetchSellerOffers();
-    }, [selectedVariantId, product?._id, product?.catalog?._id, product?.variants]);
+    }, [selectedVariantId, product?._id, product?.catalog?._id, product?.variants, locationFilter]);  // ✅ Add locationFilter dependency
 
     useEffect(() => {
         let checkCategoriesInterval: ReturnType<typeof setTimeout> | undefined;
@@ -220,7 +217,7 @@ const ProductDetails = () => {
         if (productId) {
             const currentProduct = products.product;
             if (!currentProduct || currentProduct._id !== productId) {
-                dispatch(fetchProductById(productId));
+                dispatch(fetchProductById({ productId, locationFilter }));  // ← Pass object with location
             }
             dispatch(fetchReviewsByProductId({ productId }));
         }
@@ -276,31 +273,11 @@ const ProductDetails = () => {
         products.product?._id,  // ✅ Add this to prevent re-fetch
         attributeState.length,
         attributesLoading,
-        categoryState?.categories
+        categoryState?.categories,
+        locationFilter
     ]);
 
-    // ✅ Auto-select first variant
-    useEffect(() => {
-        if (product?.variants && product.variants.length > 0 && !selectedColor) {
-            const firstActiveVariant = product.variants.find(v => v.isActive !== false);
 
-            if (firstActiveVariant) {
-                // Set the color
-                setSelectedColor(firstActiveVariant.color);
-
-                // Set the variant ID
-                setSelectedVariantId(firstActiveVariant._id || '');
-
-                // Set the specifications
-                if (firstActiveVariant.specifications) {
-                    setSelectedSpecs(firstActiveVariant.specifications as Record<string, string>);
-                }
-
-                // Reset image to first
-                setSelectedImage(0);
-            }
-        }
-    }, [product?.variants, selectedColor]);
 
     // ✅ UPDATED: Separate attributes by type - more flexible filtering
     const { variantAttributes, highlightAttributes } = useMemo(() => {
@@ -329,30 +306,56 @@ const ProductDetails = () => {
         return { variantAttributes: variantAttrs, highlightAttributes: highlightAttrs };
     }, [attributeState]);
 
-    // ✅ UPDATED: Get current variant with offer data merged
+    // ✅ AFTER (fixed):
     const currentVariant = useMemo(() => {
         if (isCatalogProduct && selectedSellerOffer && selectedVariantId) {
-            // For catalog products, use selected seller's variant
             const variant = selectedSellerOffer.variants?.find((v: any) =>
                 v._id === selectedVariantId && v.isActive !== false
             );
             if (!variant) return null;
-
-            // Merge offer data into variant for display
             const activeOffer = variant.offers?.find((o: any) => o.isActive !== false);
-            return activeOffer ? { ...variant, ...activeOffer } : variant;
+
+            if (activeOffer) {
+                return {
+                    // ✅ Keep ALL variant fields intact
+                    ...variant,
+                    // ✅ ONLY merge offer pricing/stock fields (NOT _id)
+                    sellingPrice: activeOffer.sellingPrice,
+                    mrpPrice: activeOffer.mrpPrice,
+                    stock: activeOffer.stock,
+                    sku: activeOffer.sku,
+                    // ✅ Store offer metadata separately
+                    offerId: activeOffer._id,
+                    offerSeller: activeOffer.seller,
+                    // ✅ Ensure variant._id is preserved
+                    _id: variant._id,
+                };
+            }
+            return variant;
         }
 
-        // For independent products, use product's variants
+        // For independent products
         if (!product?.variants || !selectedVariantId) return null;
         const variant = product.variants.find(v =>
             v._id === selectedVariantId && v.isActive !== false
         );
         if (!variant) return null;
 
-        // ✅ Merge first active offer data into variant for display
         const activeOffer = variant.offers?.find((o: any) => o.isActive !== false);
-        return activeOffer ? { ...variant, ...activeOffer } : variant;
+
+        if (activeOffer) {
+            return {
+                ...variant,
+                sellingPrice: activeOffer.sellingPrice,
+                mrpPrice: activeOffer.mrpPrice,
+                stock: activeOffer.stock,
+                sku: activeOffer.sku,
+                offerId: activeOffer._id,
+                offerSeller: activeOffer.seller,
+                _id: variant._id,  // ✅ Critical: preserve variant._id
+            };
+        }
+        return variant;
     }, [isCatalogProduct, selectedSellerOffer, product?.variants, selectedVariantId]);
 
     const colorsWithImages = useMemo(() => {
@@ -361,19 +364,20 @@ const ProductDetails = () => {
 
         const colorMap = new Map<string, { color: string; images: string[]; variants: any[] }>();
 
+        // ✅ First, collect all variants grouped by color
         sourceProduct.variants
             .filter((v: any) => v.isActive !== false && v.color)
             .forEach((v: any) => {
                 if (!colorMap.has(v.color)) {
                     colorMap.set(v.color, {
                         color: v.color,
-                        images: [],  // Start with empty array
+                        images: [],
                         variants: []
                     });
                 }
                 colorMap.get(v.color)!.variants.push(v);
 
-                // ✅ Collect ALL images from ALL variants of this color
+                // Collect ALL images from ALL variants of this color
                 if (v.images && Array.isArray(v.images)) {
                     v.images.forEach((img: string) => {
                         if (img && img.trim() !== '' && !colorMap.get(v.color)!.images.includes(img)) {
@@ -383,22 +387,165 @@ const ProductDetails = () => {
                 }
             });
 
-        return Array.from(colorMap.values());
-    }, [isCatalogProduct, selectedSellerOffer, product?.variants]);
+        // ✅ NEW: If district filter is active, filter out colors with no available variants in that district
+        let colorsArray = Array.from(colorMap.values());
 
+        if (locationFilter?.type === 'district' && locationFilter.district) {
+            const targetDistrict = locationFilter.district;
+
+            colorsArray = colorsArray.filter(colorData => {
+                // Check if this color has ANY variant with an offer from a seller in the selected district
+                const hasVariantInDistrict = colorData.variants.some(variant => {
+                    // Check variant's own offers
+                    const hasOwnOffer = variant.offers?.some((offer: any) =>
+                        offer.seller?.district === targetDistrict &&
+                        offer.isActive !== false &&
+                        (offer.stock ?? 0) > 0
+                    );
+
+                    // Also check sellerOffers
+                    const hasSellerOffer = sellerOffers.some((offer: any) => {
+                        const variantInOffer = offer.variants?.find((v: any) => v._id === variant._id);
+                        return variantInOffer &&
+                            offer.seller?.district === targetDistrict &&
+                            (variantInOffer.stock ?? 0) > 0;
+                    });
+
+                    return hasOwnOffer || hasSellerOffer;
+                });
+                return hasVariantInDistrict;
+            });
+        }
+
+        return colorsArray;
+    }, [isCatalogProduct, selectedSellerOffer, product?.variants, sellerOffers, locationFilter]);  // ✅ Add locationFilter dependency
+
+useEffect(() => {
+  if (
+    colorsWithImages && 
+    Array.isArray(colorsWithImages) &&
+    colorsWithImages.length > 0 && 
+    !selectedColor  // Only if no color is selected
+  ) {
+    const firstColor = colorsWithImages[0].color;
+    if (firstColor) {
+      setSelectedColor(firstColor);
+      console.log('✅ [ProductDetails] Auto-selected first color:', firstColor);
+    }
+  }
+}, [colorsWithImages, selectedColor]);  
+
+
+    // ✅ FIXED: Include offers from all sellers for independent products too + DISTRICT FILTER
     const availableVariantsForColor = useMemo(() => {
         if (!selectedColor) return [];
 
-        // ✅ Get all variants from all sellers that match the color
-        const allVariants = isCatalogProduct && sellerOffers.length > 0
-            ? sellerOffers.flatMap(offer => offer.variants || [])
-            : product?.variants || [];
+        // Get base variants from product
+        const baseVariants = product?.variants || [];
 
-        // ✅ Filter by color and active status
-        return allVariants.filter((v: any) =>
+        // Filter by color first
+        let colorFiltered = baseVariants.filter((v: any) =>
             v.color?.toLowerCase() === selectedColor.toLowerCase() && v.isActive !== false
         );
-    }, [selectedColor, isCatalogProduct, sellerOffers, product?.variants]);
+
+
+
+        // ✅ NEW: If district filter is active, filter variants that have offers from that district
+        if (locationFilter?.type === 'district' && locationFilter.district) {
+            colorFiltered = colorFiltered.filter((variant: any) => {
+                // Check if this variant has ANY offer from a seller in the selected district
+                const hasOfferInDistrict = variant.offers?.some((offer: any) =>
+                    offer.seller?.district === locationFilter.district &&
+                    offer.isActive !== false &&
+                    (offer.stock ?? 0) > 0
+                );
+
+                // Also check sellerOffers if available
+                const hasSellerOfferInDistrict = sellerOffers.some((offer: any) => {
+                    const variantInOffer = offer.variants?.find((v: any) => v._id === variant._id);
+                    return variantInOffer &&
+                        offer.seller?.district === locationFilter.district &&
+                        (variantInOffer.stock ?? 0) > 0;
+                });
+
+                return hasOfferInDistrict || hasSellerOfferInDistrict;
+            });
+        }
+
+        // ✅ For independent products: if sellerOffers exist, merge them
+        if (!isCatalogProduct && sellerOffers.length > 0) {
+            // Add variants from seller offers that match the color
+            const offerVariants = sellerOffers
+                .flatMap((offer: any) => offer.variants || [])
+                .filter((v: any) =>
+                    v.color?.toLowerCase() === selectedColor.toLowerCase() &&
+                    v.isActive !== false
+                );
+
+            // ✅ If district filter is active, also filter offerVariants
+            let filteredOfferVariants = offerVariants;
+            if (locationFilter?.type === 'district' && locationFilter.district) {
+                filteredOfferVariants = offerVariants.filter((v: any) => {
+                    // Find the offer that contains this variant
+                    const matchingOffer = sellerOffers.find((offer: any) =>
+                        offer.variants?.some((ov: any) => ov._id === v._id) &&
+                        offer.seller?.district === locationFilter.district
+                    );
+                    return !!matchingOffer;
+                });
+            }
+
+            // Merge and deduplicate by variant._id
+            const allVariants = [...colorFiltered, ...filteredOfferVariants];
+            const uniqueVariants = allVariants.filter(
+                (v, index, self) => index === self.findIndex(t => t._id === v._id)
+            );
+            return uniqueVariants;
+        }
+
+        return colorFiltered;
+    }, [selectedColor, isCatalogProduct, sellerOffers, product?.variants, locationFilter]);  // ✅ Add locationFilter dependency
+
+  // ✅ Auto-select first available variant when color is selected (TypeScript-safe)
+useEffect(() => {
+  // ✅ Explicit type guard for product.variants
+  const variants = product?.variants;
+  
+  if (
+    variants && 
+    Array.isArray(variants) && 
+    variants.length > 0 && 
+    selectedColor && 
+    !selectedVariantId && 
+    availableVariantsForColor.length > 0
+  ) {
+    // Find the first variant that has active offers with stock
+    const firstAvailable = availableVariantsForColor.find((v: any) => 
+      v.isActive !== false && 
+      v.offers?.some((o: any) => o.isActive !== false && (o.stock ?? 0) > 0)
+    );
+    
+    if (firstAvailable) {
+      setSelectedVariantId(firstAvailable._id || '');
+      
+      if (firstAvailable.specifications) {
+        setSelectedSpecs(firstAvailable.specifications as Record<string, string>);
+        
+        // Set size label
+        const variantLabels = variantAttributes
+          .map(attr => firstAvailable.specifications?.[attr.name])
+          .filter(Boolean);
+        const combinedLabel = variantLabels.length > 0 
+          ? variantLabels.join(' + ') 
+          : `${firstAvailable.specifications?.storage || ''} + ${firstAvailable.specifications?.ram || ''}`.trim() || 'Default';
+        setSelectedSize(combinedLabel);
+      }
+      
+      setSelectedImage(0);
+      
+    }
+  }
+}, [product?.variants, selectedColor, selectedVariantId, availableVariantsForColor, variantAttributes]);
 
     const availableSellersForVariant = useMemo(() => {
         if (!selectedVariantId || !isCatalogProduct) return [];
@@ -432,28 +579,37 @@ const ProductDetails = () => {
     const handleColorSelect = useCallback((color: string, variantId?: string) => {
         setSelectedColor(color);
         setSelectedSpecs({});
+        setSelectedVariantId('');  // ✅ Clear variant when color changes
+        setSelectedSize('');  // ✅ Clear size when color changes
         setSelectedImage(0);
+
+        // ✅ If variantId is provided, select it immediately
         if (variantId) {
             setSelectedVariantId(variantId);
         }
+        // ✅ Otherwise, the useEffect above will auto-select the first available variant
     }, []);
 
     const handleVariantSelect = useCallback((variant: ProductVariant) => {
-        console.log('🔍 [Variant Select] Selected:', {
-            variantId: variant._id,
-            color: variant.color,
-            specs: variant.specifications,
-            stock: variant.stock
-        });
-
         setSelectedVariantId(variant._id || '');
+
         if (variant.specifications) {
             setSelectedSpecs(variant.specifications as Record<string, string>);
+
+            // ✅ Set size as combination of key specs (e.g., "3GB+64GB")
+            const variantAttrs = variantAttributes;
+            const variantLabels = variantAttrs
+                .map(attr => variant.specifications?.[attr.name])
+                .filter(Boolean);
+            const combinedLabel = variantLabels.length > 0
+                ? variantLabels.join(' + ')
+                : `${variant.specifications?.storage || ''} + ${variant.specifications?.ram || ''}`.trim() || 'Default';
+            setSelectedSize(combinedLabel);
         }
 
-        // ✅ Reset selected seller when variant changes
         setSelectedSellerOffer(null);
-    }, []);
+
+    }, [variantAttributes]);  // ✅ Add dependency
 
     const handleSpecSelect = useCallback((attrName: string, value: string) => {
         setSelectedSpecs(prev => ({ ...prev, [attrName]: value }));
@@ -474,6 +630,14 @@ const ProductDetails = () => {
         return Math.round(((mrp - selling) / mrp) * 100);
     };
 
+    // ✅ ADD: Format distance for display
+    const formatDistance = (distance?: number | null): string => {
+        if (distance === null || distance === undefined || isNaN(distance)) return '';
+        if (distance < 1) return '<1 km';
+        return `${distance.toFixed(1)} km`;
+    };
+
+    // ✅ FIXED handleAddCart:
     const handleAddCart = useCallback(() => {
         const jwt = localStorage.getItem('jwt');
         if (!jwt) {
@@ -495,16 +659,31 @@ const ProductDetails = () => {
             return;
         }
 
+        // ✅ Determine sellerId: from selected offer OR current variant's offer
+        const sellerId =
+            selectedSellerOffer?.seller?._id ||
+            selectedSellerOffer?.seller ||
+            currentVariant.offerSeller?._id ||
+            currentVariant.offerSeller ||
+            (isCatalogProduct ? undefined : product?.seller?._id);
+
         const cartRequest = {
             productId: productId,
             quantity: quantity,
+            // ✅ CRITICAL: currentVariant._id is now the VARIANT id (not offer id)
             variantId: currentVariant._id,
-            // ✅ Add sellerId for catalog products
-            sellerId: isCatalogProduct ? selectedSellerOffer?._id : undefined,
-            ...(currentVariant._id && { variantId: currentVariant._id }),
-            ...(selectedColor && { color: selectedColor }),
-            ...(Object.keys(selectedSpecs).length > 0 && { specifications: selectedSpecs }),
+            // ✅ Include sellerId for multi-seller support (both catalog & independent)
+            sellerId: sellerId,
+            // ✅ Include size (required by CartItem schema)
+            size: selectedSize || currentVariant.color || 'Default',
+            // ✅ Include color & specs for variant matching fallback
+            color: selectedColor,
+            specifications: Object.keys(selectedSpecs).length > 0 ? selectedSpecs : undefined,
+            // ✅ Optional: include offerId for precise offer tracking
+            ...(currentVariant.offerId && { offerId: currentVariant.offerId }),
         };
+
+        console.log('🛒 Adding to cart:', cartRequest); // Debug log
 
         dispatch(addItemToCart({ jwt, request: cartRequest })).then((result) => {
             if (addItemToCart.fulfilled.match(result)) {
@@ -518,7 +697,18 @@ const ProductDetails = () => {
                 setSnackbarOpen(true);
             }
         });
-    }, [productId, currentVariant, selectedColor, selectedSpecs, quantity, isCatalogProduct, selectedSellerOffer, dispatch]);
+    }, [
+        productId,
+        currentVariant,
+        selectedColor,
+        selectedSpecs,
+        selectedSize,  // ✅ Added dependency
+        quantity,
+        isCatalogProduct,
+        selectedSellerOffer,
+        product?.seller?._id,  // ✅ Added dependency
+        dispatch
+    ]);
 
     const handleSnackbarClose = () => setSnackbarOpen(false);
 
@@ -866,120 +1056,143 @@ const ProductDetails = () => {
 
                                         {/* ✅ Display Seller Offers in Table Format */}
                                         {sellerOffers.length > 0 ? (
-                                            <Box sx={{ mt: 2, mb: 2 }}>
-                                                <Typography variant="subtitle2" fontWeight="bold" gutterBottom color="text.secondary" sx={{ mb: 2 }}>
-                                                    🏪 Select Seller ({sellerOffers.length} offers available):
-                                                </Typography>
+  <Box sx={{ mt: 2, mb: 2 }}>
+    <Typography variant="subtitle2" fontWeight="bold" gutterBottom color="text.secondary" sx={{ mb: 2 }}>
+      🏪 Select Seller ({sellerOffers.length} offers available):
+    </Typography>
 
-                                                {/* Table Header */}
-                                                <Box sx={{
-                                                    display: 'grid',
-                                                    gridTemplateColumns: '2fr 1fr 1fr 100px',
-                                                    gap: 2,
-                                                    p: 2,
-                                                    bgcolor: 'grey.100',
-                                                    borderRadius: 1,
-                                                    fontWeight: 'bold',
-                                                    fontSize: '0.875rem'
-                                                }}>
-                                                    <Typography variant="body2">Seller</Typography>
-                                                    <Typography variant="body2">MRP</Typography>
-                                                    <Typography variant="body2">Selling Price</Typography>
-                                                    <Typography variant="body2">Action</Typography>
-                                                </Box>
+    {/* Table Header */}
+    <Box sx={{
+      display: 'grid',
+      // ✅ Conditionally include distance column width
+      gridTemplateColumns: locationFilter?.type === 'current' 
+        ? '2fr 1fr 1fr 80px 100px'  // ✅ With distance column
+        : '2fr 1fr 1fr 100px',       // ✅ Without distance column
+      gap: 2,
+      p: 2,
+      bgcolor: 'grey.100',
+      borderRadius: 1,
+      fontWeight: 'bold',
+      fontSize: '0.875rem'
+    }}>
+      <Typography variant="body2">Seller</Typography>
+      {/* ✅ Only show Distance header if current location is active */}
+      {locationFilter?.type === 'current' && (
+        <Typography variant="body2" sx={{ textAlign: 'center' }}>Distance</Typography>
+      )}
+      <Typography variant="body2">MRP</Typography>
+      <Typography variant="body2">Selling Price</Typography>
+      <Typography variant="body2">Action</Typography>
+    </Box>
 
-                                                {/* Table Rows */}
-                                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-                                                    {sellerOffers.map((offer) => {
-                                                        const variant = offer.variants.find((v: any) => v._id === selectedVariantId);
-                                                        if (!variant) return null;
+    {/* Table Rows */}
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+      {sellerOffers.map((offer) => {
+        const variant = offer.variants.find((v: any) => v._id === selectedVariantId);
+        if (!variant) return null;
 
-                                                        const isSelected = selectedSellerOffer?._id === offer._id;
+        const isSelected = selectedSellerOffer?._id === offer._id;
 
-                                                        // ✅ Extract seller name with proper fallback chain
-                                                        const sellerName =
-                                                            offer.seller?.businessDetails?.businessName ||  // Priority 1: Business name
-                                                            offer.seller?.sellerName ||                     // Priority 2: Seller name
-                                                            'Seller';                                       // Fallback
+        // ✅ Extract seller name with proper fallback chain
+        const sellerName =
+          offer.seller?.businessDetails?.businessName ||  // Priority 1: Business name
+          offer.seller?.sellerName ||                     // Priority 2: Seller name
+          'Seller';                                       // Fallback
 
-                                                        const discount = variant.mrpPrice && variant.mrpPrice > variant.sellingPrice
-                                                            ? Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)
-                                                            : 0;
+        const discount = variant.mrpPrice && variant.mrpPrice > variant.sellingPrice
+          ? Math.round(((variant.mrpPrice - variant.sellingPrice) / variant.mrpPrice) * 100)
+          : 0;
 
-                                                        return (
-                                                            <Box
-                                                                key={offer._id}
-                                                                onClick={() => setSelectedSellerOffer(offer)}
-                                                                sx={{
-                                                                    display: 'grid',
-                                                                    gridTemplateColumns: '2fr 1fr 1fr 100px',
-                                                                    gap: 2,
-                                                                    p: 2,
-                                                                    border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
-                                                                    borderRadius: 1,
-                                                                    cursor: 'pointer',
-                                                                    bgcolor: isSelected ? '#fff3e0' : 'white',
-                                                                    '&:hover': { borderColor: '#ff9f00', boxShadow: 1 },
-                                                                    transition: 'all 0.2s',
-                                                                    alignItems: 'center'
-                                                                }}
-                                                            >
-                                                                {/* Seller Name */}
-                                                                <Box>
-                                                                    <Typography variant="body2" fontWeight="bold" color="text.primary">
-                                                                        {sellerName}
-                                                                    </Typography>
-                                                                    {discount > 0 && (
-                                                                        <Typography variant="caption" color="success.main" fontWeight="bold">
-                                                                            ↓{discount}% off
-                                                                        </Typography>
-                                                                    )}
-                                                                </Box>
+        return (
+          <Box
+            key={offer._id}
+            onClick={() => setSelectedSellerOffer(offer)}
+            sx={{
+              display: 'grid',
+              // ✅ Match header grid layout
+              gridTemplateColumns: locationFilter?.type === 'current' 
+                ? '2fr 1fr 1fr 80px 100px'  // ✅ With distance column
+                : '2fr 1fr 1fr 100px',       // ✅ Without distance column
+              gap: 2,
+              p: 2,
+              border: isSelected ? '2px solid #ff9f00' : '1px solid #e0e0e0',
+              borderRadius: 1,
+              cursor: 'pointer',
+              bgcolor: isSelected ? '#fff3e0' : 'white',
+              '&:hover': { borderColor: '#ff9f00', boxShadow: 1 },
+              transition: 'all 0.2s',
+              alignItems: 'center'
+            }}
+          >
+            {/* Seller Name */}
+            <Box>
+              <Typography variant="body2" fontWeight="bold" color="text.primary">
+                {sellerName}
+              </Typography>
+              {discount > 0 && (
+                <Typography variant="caption" color="success.main" fontWeight="bold">
+                  ↓{discount}% off
+                </Typography>
+              )}
+            </Box>
 
-                                                                {/* MRP */}
-                                                                <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
-                                                                    ₹{variant.mrpPrice?.toLocaleString() || 'N/A'}
-                                                                </Typography>
+            {/* ✅ Only show Distance if current location is active */}
+            {locationFilter?.type === 'current' && (
+              <Box sx={{ textAlign: 'center' }}>
+                {offer.distance !== null && offer.distance !== undefined && !isNaN(offer.distance) ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {formatDistance(offer.distance)}
+                  </Typography>
+                ) : (
+                  <Typography variant="body2" color="text.disabled">-</Typography>
+                )}
+              </Box>
+            )}
 
-                                                                {/* Selling Price */}
-                                                                <Typography variant="body1" fontWeight="bold" color="primary">
-                                                                    ₹{variant.sellingPrice?.toLocaleString() || 'N/A'}
-                                                                </Typography>
+            {/* MRP */}
+            <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
+              ₹{variant.mrpPrice?.toLocaleString() || 'N/A'}
+            </Typography>
 
-                                                                {/* Select Button */}
-                                                                <Button
-                                                                    size="small"
-                                                                    variant={isSelected ? 'contained' : 'outlined'}
-                                                                    color="primary"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setSelectedSellerOffer(offer);
-                                                                    }}
-                                                                    sx={{ fontSize: '0.75rem', py: 0.5 }}
-                                                                >
-                                                                    {isSelected ? '✓ Selected' : 'Select'}
-                                                                </Button>
-                                                            </Box>
-                                                        );
-                                                    })}
-                                                </Box>
-                                            </Box>
-                                        ) : (
-                                            /* Show regular price info when no seller offers */
-                                            <Box sx={{ p: 2, mb: 2, bgcolor: 'primary.50', borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>
-                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Price for selected variant:</Typography>
-                                                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
-                                                    <Typography variant="h5" fontWeight="bold" color="primary.main">₹{currentVariant.sellingPrice?.toLocaleString()}</Typography>
-                                                    {currentVariant.mrpPrice && currentVariant.mrpPrice > (currentVariant.sellingPrice || 0) && (
-                                                        <>
-                                                            <Typography variant="body1" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>₹{currentVariant.mrpPrice.toLocaleString()}</Typography>
-                                                            <Chip label={`${calculateDiscount(currentVariant.mrpPrice, currentVariant.sellingPrice)}% OFF`} size="small" color="success" sx={{ fontWeight: 'bold' }} />
-                                                        </>
-                                                    )}
-                                                </Box>
-                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Inclusive of all taxes. Free Shipping above ₹1500.</Typography>
-                                            </Box>
-                                        )}
+            {/* Selling Price */}
+            <Typography variant="body1" fontWeight="bold" color="primary">
+              ₹{variant.sellingPrice?.toLocaleString() || 'N/A'}
+            </Typography>
+
+            {/* Select Button */}
+            <Button
+              size="small"
+              variant={isSelected ? 'contained' : 'outlined'}
+              color="primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedSellerOffer(offer);
+              }}
+              sx={{ fontSize: '0.75rem', py: 0.5 }}
+            >
+              {isSelected ? '✓ Selected' : 'Select'}
+            </Button>
+          </Box>
+        );
+      })}
+    </Box>
+  </Box>
+) : (
+  /* Show regular price info when no seller offers */
+  <Box sx={{ p: 2, mb: 2, bgcolor: 'primary.50', borderRadius: 1, border: '1px dashed', borderColor: 'primary.main' }}>
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>Price for selected variant:</Typography>
+    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
+      <Typography variant="h5" fontWeight="bold" color="primary.main">₹{currentVariant.sellingPrice?.toLocaleString()}</Typography>
+      {currentVariant.mrpPrice && currentVariant.mrpPrice > (currentVariant.sellingPrice || 0) && (
+        <>
+          <Typography variant="body1" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>₹{currentVariant.mrpPrice.toLocaleString()}</Typography>
+          <Chip label={`${calculateDiscount(currentVariant.mrpPrice, currentVariant.sellingPrice)}% OFF`} size="small" color="success" sx={{ fontWeight: 'bold' }} />
+        </>
+      )}
+    </Box>
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Inclusive of all taxes. Free Shipping above ₹1500.</Typography>
+  </Box>
+)}
 
                                         {/* ✅ REMOVED: Stock chip that was here */}
 

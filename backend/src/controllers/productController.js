@@ -1,9 +1,8 @@
 // ✅ backend/src/controllers/productController.js
-// ✅ CommonJS imports - NO 'import' statements
 const { createProductSchema, updateProductSchema } = require("../validators/productValidators");
 const ProductService = require("../services/ProductService");
 const ProductError = require("../exceptions/ProductError");
-const mongoose = require('mongoose'); // ✅ Add mongoose for ObjectId validation
+const mongoose = require('mongoose');
 
 class SellerProductController {
   // ✅ Arrow function methods = auto-bound 'this'
@@ -49,11 +48,45 @@ class SellerProductController {
   getProductById = async (req, res) => {
     try {
       const { productId } = req.params;
-      const { color, ...specs } = req.query;
+
+      // ✅ CRITICAL: Extract location params BEFORE building specs
+      const {
+        color,
+        // Location params (extract these FIRST)
+        userLat, userLng, radiusKm, district,
+        // ...specs captures ONLY remaining unknown params
+        ...specs
+      } = req.query;
+
+      // ✅ Build location filter from extracted params
+      let locationFilter = null;
+      if (userLat && userLng) {
+        const lat = parseFloat(userLat);
+        const lng = parseFloat(userLng);
+        const radius = radiusKm ? parseFloat(radiusKm) : 50;
+        if (!isNaN(lat) && !isNaN(lng)) {
+          locationFilter = {
+            type: 'current',
+            coordinates: { lat, lng },
+            radiusKm: radius
+          };
+        }
+      } else if (district && typeof district === 'string' && district.trim()) {
+        locationFilter = {
+          type: 'district',
+          district: district.trim()
+        };
+      }
+
+      // ✅ Only pass specs if it has non-location keys
+      const validSpecs = Object.keys(specs).length > 0 ? specs : undefined;
+
       const product = await ProductService.getProductById(productId, {
         color: color?.toLowerCase(),
-        specs
+        specs: validSpecs,
+        location: locationFilter
       });
+
       res.status(200).json({ success: true, data: product });
     } catch (error) {
       console.error("❌ Get product error:", error.message);
@@ -76,49 +109,39 @@ class SellerProductController {
     }
   }
 
-  // ✅✅✅ NEW: Get seller's catalog offers (products linked to catalogs)
+  // ✅ NEW: Get seller's catalog offers
   getSellerCatalogOffers = async (req, res) => {
-     try {
-    const seller = req.seller;
-    const { page = 0, limit = 20 } = req.query;
-    
-    console.log('🔍 [Controller] Fetching catalog offers for seller:', {
-      sellerId: seller._id,
-      page: parseInt(page),
-      limit: parseInt(limit)
-    });
-    
-    // ✅✅✅ FIXED: Query for products where seller has offers in variants[].offers[]
-    // This finds products where the seller has listed an offer (catalog or independent)
-    const query = {
-      isActive: true,
-      'variants.offers': { $elemMatch: { 
-        seller: seller._id,  // ✅ Match seller ObjectId
-        isActive: { $ne: false }  // ✅ Only active offers
-      }}
-    };
-    
-    console.log('🔍 [Controller] Query:', JSON.stringify(query, null, 2));
-    
-    const products = await require('../services/ProductService').getProductsByQuery(
-      query, 
-      parseInt(page), 
-      parseInt(limit)
-    );
-    
-    console.log(`✅ [Controller] Found ${products?.length || 0} products with seller offers`);
-    
+    try {
+      const seller = req.seller;
+      const { page = 0, limit = 20 } = req.query;
+
+      const query = {
+        isActive: true,
+        'variants.offers': {
+          $elemMatch: {
+            seller: seller._id,
+            isActive: { $ne: false }
+          }
+        }
+      };
+
+      const products = await require('../services/ProductService').getProductsByQuery(
+        query,
+        parseInt(page),
+        parseInt(limit)
+      );
+
       res.status(200).json({
         success: true,
         data: products || [],
         count: products?.length || 0
       });
-      
+
     } catch (error) {
       console.error("❌ Get seller catalog offers error:", error.message);
-      res.status(500).json({ 
-        success: false, 
-        message: error.message || "Failed to fetch catalog offers" 
+      res.status(500).json({
+        success: false,
+        message: error.message || "Failed to fetch catalog offers"
       });
     }
   }
@@ -138,106 +161,150 @@ class SellerProductController {
     }
   }
 
-  // ✅✅✅ FIXED: searchProducts method - Proper query handling
-  searchProducts = async (req, res) => {
-    try {
-      console.log('🔍 [CONTROLLER] Raw query params:', req.query);
+// ✅✅✅ FULLY FIXED: searchProducts method with location + district support
+searchProducts = async (req, res) => {
+  try {
+    // ✅ Extract ALL params explicitly (including location)
+    const {
+      q, query, search, category, colors, color, brand, size,
+      minPrice, maxPrice, minDiscount, discount,
+      sortBy, sort, page, pageNumber, limit, stock,
+      // ✅ NEW: Location filter params
+      userLat, userLng, radiusKm, district
+    } = req.query;
 
-      // ✅ Extract KNOWN params explicitly
-      const {
-        q, query, search, category, colors, color, brand, size,
-        minPrice, maxPrice, minDiscount, discount,
-        sortBy, sort, page, pageNumber, limit, stock
-      } = req.query;
+    // ✅ Define params that should NOT be treated as specs
+    const KNOWN_PARAMS = new Set([
+      // Search & category
+      'q', 'query', 'search', 'category',
+      // Filter params
+      'colors', 'color', 'brand', 'size', 'stock',
+      'minPrice', 'maxPrice', 'minDiscount', 'discount',
+      // Pagination & sorting
+      'page', 'pageNumber', 'limit', 'sortBy', 'sort',
+      // Auth (if passed)
+      'jwt', 'token',
+      // ✅ NEW: Location filter params
+      'userLat', 'userLng', 'radiusKm', 'district'
+    ]);
 
-      // ✅ Define params that should NOT be treated as specs
-      const KNOWN_PARAMS = new Set([
-        // Search & category
-        'q', 'query', 'search', 'category',
-        // Filter params
-        'colors', 'color', 'brand', 'size', 'stock',
-        'minPrice', 'maxPrice', 'minDiscount', 'discount',
-        // Pagination & sorting
-        'page', 'pageNumber', 'limit', 'sortBy', 'sort',
-        // Auth (if passed)
-        'jwt', 'token'
-      ]);
-
-      // ✅ Safely collect ONLY true dynamic specs
-      const specs = {};
-      for (const [key, value] of Object.entries(req.query)) {
-        if (KNOWN_PARAMS.has(key) || !value || value === 'undefined' || value === 'null') {
-          continue;
-        }
-        const values = Array.isArray(value)
-          ? value.map(v => String(v).trim()).filter(v => v && v !== 'undefined')
-          : String(value).split(',').map(v => v.trim()).filter(v => v && v !== 'undefined');
-        if (values.length > 0) {
-          specs[key] = values;
-          console.log(`🔍 [CONTROLLER] Adding dynamic spec: ${key} = [${values.join(', ')}]`);
-        }
+    // ✅ Safely collect ONLY true dynamic specs
+    const specs = {};
+    for (const [key, value] of Object.entries(req.query)) {
+      if (KNOWN_PARAMS.has(key) || !value || value === 'undefined' || value === 'null') {
+        continue;
       }
-
-      // ✅ Normalize search term from q, query, OR search
-      const searchTerm = q || query || search;
-
-      // ✅ Handle page/pageNumber normalization
-      const pageNum = pageNumber !== undefined ? parseInt(pageNumber) : (page ? parseInt(page) : 0);
-      const limitNum = limit ? parseInt(limit) : 20;
-
-      // ✅ Build filters object
-      const filters = {
-        search: searchTerm,
-        category,
-        colors: colors?.split?.(',').map(c => c.trim()).filter(Boolean),
-        specs: Object.keys(specs).length > 0 ? specs : undefined,
-        minPrice: minPrice ? parseFloat(minPrice) : undefined,
-        maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
-        minDiscount: minDiscount ? parseFloat(minDiscount) : undefined,
-        sortBy: sortBy || sort || 'newest',
-        page: pageNum,
-        limit: limitNum
-      };
-
-      console.log('🔍 [CONTROLLER] Final filters sent to service:', {
-        search: filters.search,
-        category: filters.category,
-        specs: filters.specs,
-        colors: filters.colors,
-        priceRange: { min: filters.minPrice, max: filters.maxPrice },
-        page: filters.page,
-        limit: filters.limit,
-        sortBy: filters.sortBy
-      });
-
-      // ✅ Call service
-      const products = await ProductService.searchProducts(filters);
-
-      console.log(`✅ [CONTROLLER] Found ${products?.length || 0} products for search: "${filters.search}"`);
-
-      res.status(200).json({
-        success: true,
-        data: products || [],
-        count: products?.length || 0,
-        page: filters.page,
-        totalPages: filters.limit ? Math.ceil((products?.length || 0) / filters.limit) : 1
-      });
-
-    } catch (error) {
-      console.error("❌ Search products error:", {
-        message: error.message,
-        stack: error.stack,
-        query: req.query
-      });
-
-      res.status(200).json({
-        success: false,
-        message: "Search failed: " + error.message,
-        data: [],
-        count: 0
-      });
+      const values = Array.isArray(value)
+        ? value.map(v => String(v).trim()).filter(v => v && v !== 'undefined')
+        : String(value).split(',').map(v => v.trim()).filter(v => v && v !== 'undefined');
+      if (values.length > 0) {
+        specs[key] = values;
+        console.log(`🔍 [CONTROLLER] Adding dynamic spec: ${key} = [${values.join(', ')}]`);
+      }
     }
+
+    // ✅✅✅ FIX: Define searchTerm properly from q/query/search
+    const searchTerm = q || query || search;
+
+    // ✅ Handle page normalization
+    const pageNum = pageNumber !== undefined ? parseInt(pageNumber) : (page ? parseInt(page) : 0);
+    const limitNum = limit ? parseInt(limit) : 20;
+
+    // ✅✅✅ NEW: Build location filter object
+    let locationFilter = null;
+    
+    if (userLat && userLng) {
+      // Current location mode: use coordinates + radius
+      const lat = parseFloat(userLat);
+      const lng = parseFloat(userLng);
+      const radius = radiusKm ? parseFloat(radiusKm) : 50; // Default 50km
+      
+      if (!isNaN(lat) && !isNaN(lng)) {
+        locationFilter = {
+          type: 'current',
+          coordinates: { lat, lng },
+          radiusKm: radius
+        };
+      }
+    } else if (district && typeof district === 'string' && district.trim()) {
+      // District mode: simple string match
+      locationFilter = {
+        type: 'district',
+        district: district.trim()
+      };
+    }
+
+    // ✅ Build complete filters object
+    const filters = {
+      search: searchTerm,  // ✅ Now searchTerm is defined
+      category,
+      colors: colors?.split?.(',').map(c => c.trim()).filter(Boolean),
+      specs: Object.keys(specs).length > 0 ? specs : undefined,
+      minPrice: minPrice ? parseFloat(minPrice) : undefined,
+      maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
+      minDiscount: minDiscount ? parseFloat(minDiscount) : undefined,
+      sortBy: sortBy || sort || 'newest',
+      page: pageNum,
+      limit: limitNum,
+      // ✅ NEW: Include location/district filter
+      location: locationFilter,
+      district: district && typeof district === 'string' ? district.trim() : undefined
+    };
+
+    // ✅ Debug logging
+    console.log('🔍 [CONTROLLER] Search filters:', {
+      search: filters.search,
+      category: filters.category,
+      location: filters.location,
+      district: filters.district,
+      page: filters.page,
+      limit: filters.limit
+    });
+
+    // ✅ Call service with filters
+    const products = await ProductService.searchProducts(filters);
+
+    // ✅ Format response
+    const responseData = {
+      success: true,
+      data: products || [],
+      count: products?.length || 0,
+      page: filters.page,
+      totalPages: filters.limit ? Math.ceil((products?.length || 0) / filters.limit) : 1
+    };
+
+    // ✅ Add distance/district info if location search was used
+    if (locationFilter?.type === 'current' && products?.length > 0) {
+      responseData.locationInfo = {
+        type: 'current',
+        coordinates: locationFilter.coordinates,
+        radiusKm: locationFilter.radiusKm,
+        resultsSortedBy: 'distance'
+      };
+    } else if (filters.district) {
+      responseData.locationInfo = {
+        type: 'district',
+        district: filters.district
+      };
+    }
+
+    res.status(200).json(responseData);
+
+  } catch (error) {
+    console.error("❌ Search products error:", {
+      message: error.message,
+      stack: error.stack,
+      query: req.query
+    });
+
+    res.status(200).json({
+      success: false,
+      message: "Search failed: " + error.message,
+      data: [],
+      count: 0
+    });
   }
+}
 
   // ✅ Wrapper for searchProduct route
   searchProduct = async (req, res, next) => {
@@ -247,18 +314,12 @@ class SellerProductController {
   // ✅ Wrapper for 'getAllProducts' route - delegates to searchProducts
   getAllProducts = async (req, res, next) => {
     try {
-      console.log('🔍 DEBUG - getAllProducts query:', {
-        query: req.query,
-        category: req.query.category,
-        categoryType: typeof req.query.category,
-        isValidObjectId: mongoose.Types.ObjectId.isValid(req.query.category)
-      });
-
       req.query = {
         ...req.query,
         page: req.query.page || 0,
         limit: req.query.limit || 20,
-        sortBy: req.query.sortBy || 'newest'  // ✅ Default to 'newest', not 'relevance'
+        sortBy: req.query.sortBy || 'newest'
+        // ✅ Location params pass through automatically via spread operator
       };
       return this.searchProducts(req, res, next);
     } catch (error) {
@@ -272,5 +333,5 @@ class SellerProductController {
   }
 }
 
-// ✅ CommonJS export - NO 'export default'
+// ✅ CommonJS export
 module.exports = new SellerProductController();

@@ -1,6 +1,4 @@
-
-
-
+/* D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Products\ProductCard\ProductCard.css */
   .card {
     @apply relative w-[250px] sm:w-full md:w-full lg:w-full h-[350px] overflow-hidden;
   }

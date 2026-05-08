@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\backend\src\services\HomeService.js
 const HomeCategorySection = require('../domain/HomeCategorySection');
 const Deal = require('../models/Deal');
 const ElectronicCategory = require('../models/ElectronicCategory'); // ✅ ADD THIS

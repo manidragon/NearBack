@@ -1,46 +1,58 @@
+// D:\Mani\Code with Zosh\Backup\source code\backend\src\services\CartService.js
 const CartItem = require("../models/CartItem");
 const Product = require("../models/Product");
 const User = require("../models/User");
 const Cart = require("../models/Cart");
 
 class CartService {
-  async findUserCart(user) {
-  
-    let cart = await Cart.findOne({ user: user._id }).populate({
+async findUserCart(user) {
+  // ✅ FIX: Deep population for variants and offers.seller
+  let cart = await Cart.findOne({ user: user._id })
+    .populate({
       path: "cartItems",
-      populate: { path: "product" },
+      populate: {
+        path: "product",
+        populate: [
+          { 
+            path: "seller", 
+            select: "sellerName businessDetails.businessName businessDetails.logo"
+          },
+          { 
+            path: "variants",  // ✅ Populate variants array
+            populate: {
+              path: "offers.seller",  // ✅ CRITICAL: Populate seller within offers
+              select: "sellerName businessDetails.businessName"
+            }
+          },
+          { path: "category" }
+        ]
+      }
     });
 
-    if (!cart) {
-      // If no cart found, you can create a new one or handle as needed
-      const newCart = new Cart({ user: user._id, cartItems: [] });
-      cart = await newCart.save();
-    }
-
-    let totalPrice = 0;
-    let totalDiscountedPrice = 0;
-    let totalItem = 0;
-
-    cart.cartItems.forEach((cartsItem) => {
-      totalPrice += cartsItem.mrpPrice;
-      totalDiscountedPrice += cartsItem.sellingPrice;
-      totalItem += cartsItem.quantity;
-    });
-    // console.log("total sellling price",totalDiscountedPrice)
-    cart.totalMrpPrice = totalPrice;
-    cart.totalItem = cart.cartItems.length;
-    cart.totalSellingPrice = totalDiscountedPrice - (cart.couponPrice || 0);
-    cart.discount = this.calculateDiscountPercentage(
-      totalPrice,
-      totalDiscountedPrice
-    );
-    cart.totalItem = totalItem;
-
-    let cartItems=await CartItem.find({cart:cart._id}).populate("product")
-    cart.cartItems = cartItems
-
+  if (!cart) {
+    const newCart = new Cart({ user: user._id, cartItems: [] });
+    cart = await newCart.save();
     return cart;
   }
+
+  // Calculate totals
+  let totalPrice = 0;
+  let totalDiscountedPrice = 0;
+  let totalItem = 0;
+
+  cart.cartItems.forEach((cartItem) => {
+    totalPrice += cartItem.mrpPrice || 0;
+    totalDiscountedPrice += cartItem.sellingPrice || 0;
+    totalItem += cartItem.quantity || 0;
+  });
+
+  cart.totalMrpPrice = totalPrice;
+  cart.totalSellingPrice = totalDiscountedPrice - (cart.couponPrice || 0);
+  cart.totalItem = totalItem;
+  cart.discount = this.calculateDiscountPercentage(totalPrice, totalDiscountedPrice);
+
+  return cart;
+}
 
   calculateDiscountPercentage(mrpPrice, sellingPrice) {
     if (mrpPrice <= 0) {
@@ -51,44 +63,63 @@ class CartService {
     return Math.round(discountPercentage);
   }
 
-  async addCartItem(user, product, size, quantity) {
+    async addCartItem(
+    user, 
+    productId, 
+    variantId, 
+    offerId, 
+    sellerId, 
+    size, 
+    quantity, 
+    unitMrpPrice, 
+    unitSellingPrice
+  ) {
     const cart = await this.findUserCart(user);
 
-    let isPresent = await CartItem.findOne({
+    // ✅ Check if item already exists (same product + variant + size + seller)
+    let existingItem = await CartItem.findOne({
       cart: cart._id,
-      product: product._id,
-      size,
+      product: productId,
+      size: size,
+      ...(variantId && { variantId: variantId }),
+      ...(sellerId && { sellerId: sellerId }),
     }).populate("product");
 
-
-
-    if (!isPresent) {
+    if (!existingItem) {
+      // ✅ Create new cart item with TOTAL prices (unit * quantity)
       const cartItem = new CartItem({
-        product,
-        quantity,
-        userId: user._id,
-        sellingPrice: quantity * product.sellingPrice,
-        mrpPrice: quantity * product.mrpPrice,
-        size,
         cart: cart._id,
+        product: productId,
+        variantId: variantId,      // ✅ Track which variant
+        sellerId: sellerId,         // ✅ Track which seller's offer
+        offerId: offerId,           // ✅ Track specific offer
+        size: size,
+        quantity: quantity,
+        // ✅ Store TOTAL prices (already multiplied)
+        mrpPrice: unitMrpPrice * quantity,
+        sellingPrice: unitSellingPrice * quantity,
+        userId: user._id,
       });
 
       await cartItem.save();
 
-      let updatedCart = await Cart.findOneAndUpdate(
-        { _id: cart._id }, // Match cart by ID
-        { $push: { cartItems: cartItem._id } }, // Add cart item ID
-        { new: true } // Return the updated document
+      // Update cart with new item reference
+      await Cart.findByIdAndUpdate(
+        cart._id,
+        { $push: { cartItems: cartItem._id } },
+        { new: true }
       );
-
-      console.log("updated cart",updatedCart);
-      
-      
 
       return cartItem;
     }
 
-    return isPresent;
+    // ✅ Item exists - update quantity and recalculate TOTAL prices
+    existingItem.quantity += quantity;
+    existingItem.mrpPrice = unitMrpPrice * existingItem.quantity;
+    existingItem.sellingPrice = unitSellingPrice * existingItem.quantity;
+    
+    await existingItem.save();
+    return existingItem;
   }
 }
 

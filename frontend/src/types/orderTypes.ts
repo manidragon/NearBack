@@ -1,3 +1,4 @@
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\types\orderTypes.ts
 import { type Product } from './productTypes';
 import { type User } from './userTypes';
 import { type Address } from './addressTypes';
@@ -44,13 +45,40 @@ export type OrderStatus =
   | 'CANCELLED';
 
 export interface OrderItem {
+  _id: string;
+  product: {
     _id: string;
-    product: Product;
-    size: string;
-    quantity: number;
-    mrpPrice: number;
-    sellingPrice: number; 
-    userId: string; // Changed from number to string (MongoDB ObjectId)
+    title: string;
+    seller?: {
+      _id: string;
+      sellerName?: string;
+      businessDetails?: { businessName?: string };
+    };
+    images?: string[];
+    variants?: Array<{
+      _id: string;
+      color: string;
+      specifications?: Record<string, string | number | boolean>; // ✅ Allow multiple value types
+      images?: string[];
+      offers?: Array<{
+        _id: string;
+        seller: string | { _id: string };
+        mrpPrice: number;
+        sellingPrice: number;
+        stock: number;
+      }>;
+    }>;
+  };
+  // ✅ ADD THIS: variantId field for tracking selected variant
+  variantId?: string;
+  sellerId?: string;
+  size: string;
+  quantity: number;
+  mrpPrice: number;
+  sellingPrice: number;
+  userId: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type FulfillmentType = 'DELIVERY' | 'SELF_PICKUP';

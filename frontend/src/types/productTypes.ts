@@ -1,7 +1,4 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\types\productTypes.ts
-import { type Seller } from "./sellerTypes";
-
-// ✅ Category reference type (flexible for API responses)
 export type CategoryReference = 
   | string  // Category _id (for create/update operations)
   | {       // Full category object (for display/fetch operations)

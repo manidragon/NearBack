@@ -419,16 +419,16 @@ productSchema.methods.getOffersForVariant = function (color, specs = {}) {
     })) || [];
 };
 
-// ✅✅✅ ENHANCED: searchWithVariants with multi-seller support
+// ✅✅✅ ENHANCED: searchWithVariants with location support
 productSchema.statics.searchWithVariants = async function (filters) {
   const {
     search, category, colors, specs,
     minPrice, maxPrice, minDiscount,
-    sortBy = 'newest', page = 0, limit = 20
+    sortBy = 'newest', page = 0, limit = 20,
+    location  // ✅ Accept location filter
   } = filters;
 
   const safeLimit = Math.min(parseInt(limit) || 20, 100);
-
   const aggregationPipeline = [];
   const searchConditions = [];
 
@@ -453,28 +453,105 @@ productSchema.statics.searchWithVariants = async function (filters) {
     );
   }
 
-  // ✅ Base match: isActive + optional catalog/category filter
-  const baseMatch = { isActive: true };
-
-  if (category) {
-    if (mongoose.Types.ObjectId.isValid(category)) {
-      baseMatch.category = new mongoose.Types.ObjectId(category);
-    } else {
-      try {
-        const Category = mongoose.model('Category');
-        const catDoc = await Category.findOne({ categoryId: category, level: 3 });
-        if (catDoc) baseMatch.category = catDoc._id;
-      } catch (err) {
-        console.warn('⚠️ Category slug resolution failed:', err.message);
-      }
+  // ✅✅✅ LOCATION HANDLING: Must be handled BEFORE building pipeline
+  let geoNearStage = null;
+  let districtFilter = null;
+  
+  if (location?.type === 'current' && location.coordinates) {
+    const { lat, lng, radiusKm = 50 } = location;
+    
+    // ✅ Validate coordinates
+    if (typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)) {
+      geoNearStage = {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [lng, lat]  // ✅ GeoJSON: [longitude, latitude]
+          },
+          distanceField: "distance",  // ✅ Adds distance field to results
+          spherical: true,
+          maxDistance: radiusKm * 1000,  // km → meters
+          distanceMultiplier: 0.001,  // ✅ Convert meters → km in response
+          query: { isActive: true }  // Base filter for $geoNear
+        }
+      };
+      console.log('📍 [MONGO] GeoNear stage:', { lat, lng, radiusKm });
     }
+  } else if (location?.type === 'district' && location.district) {
+    districtFilter = location.district.trim();
+    console.log('🏙️ [MONGO] District filter:', { district: districtFilter });
   }
 
-  aggregationPipeline.push({ $match: baseMatch });
-
-  // ✅ Apply search conditions with $or
-  if (searchConditions.length > 0) {
-    aggregationPipeline.push({ $match: { $or: searchConditions } });
+  // ✅✅✅ BUILD PIPELINE: $geoNear MUST BE FIRST if present
+  if (geoNearStage) {
+    // ✅ $geoNear replaces initial $match - include isActive in geoNear.query
+    aggregationPipeline.push(geoNearStage);
+    
+    // ✅ Apply search conditions AFTER geoNear
+    if (searchConditions.length > 0) {
+      aggregationPipeline.push({ $match: { $or: searchConditions } });
+    }
+    
+    // ✅ Apply category filter
+    if (category) {
+      if (mongoose.Types.ObjectId.isValid(category)) {
+        aggregationPipeline.push({ $match: { category: new mongoose.Types.ObjectId(category) } });
+      } else {
+        try {
+          const Category = mongoose.model('Category');
+          const catDoc = await Category.findOne({ categoryId: category, level: 3 });
+          if (catDoc) {
+            aggregationPipeline.push({ $match: { category: catDoc._id } });
+          }
+        } catch (err) {
+          console.warn('⚠️ Category slug resolution failed:', err.message);
+        }
+      }
+    }
+    
+  } else {
+    // ✅ Normal flow (no geospatial): start with base match
+    const baseMatch = { isActive: true };
+    
+    if (category) {
+      if (mongoose.Types.ObjectId.isValid(category)) {
+        baseMatch.category = new mongoose.Types.ObjectId(category);
+      } else {
+        try {
+          const Category = mongoose.model('Category');
+          const catDoc = await Category.findOne({ categoryId: category, level: 3 });
+          if (catDoc) baseMatch.category = catDoc._id;
+        } catch (err) {
+          console.warn('⚠️ Category slug resolution failed:', err.message);
+        }
+      }
+    }
+    
+    aggregationPipeline.push({ $match: baseMatch });
+    
+    // ✅ Apply search conditions
+    if (searchConditions.length > 0) {
+      aggregationPipeline.push({ $match: { $or: searchConditions } });
+    }
+    
+    // ✅ Apply district filter if set
+    if (districtFilter) {
+      aggregationPipeline.push({
+        $lookup: {
+          from: 'sellers',
+          localField: 'seller',
+          foreignField: '_id',
+          as: 'sellerInfo',
+          pipeline: [
+            { $match: { district: districtFilter } },
+            { $project: { _id: 1, district: 1 } }
+          ]
+        }
+      });
+      aggregationPipeline.push({
+        $match: { 'sellerInfo.0': { $exists: true } }
+      });
+    }
   }
 
   // ✅ Price filters (based on best offer price)
@@ -530,15 +607,19 @@ productSchema.statics.searchWithVariants = async function (filters) {
     $match: { activeVariants: { $ne: [], $exists: true } }
   });
 
-  // ✅ Sort options - support sorting by best offer price
+  // ✅ Sort options - support sorting by distance when geoNear is used
   const sortOptions = {
     'price_low': { minPrice: 1 },
     'price_high': { minPrice: -1 },
     'newest': { createdAt: -1 },
     'rating': { averageRating: -1, createdAt: -1 },
-    'relevance': { createdAt: -1 }
+    'relevance': { createdAt: -1 },
+    'distance': { distance: 1 }  // ✅ NEW: Sort by distance (nearest first)
   };
-  const selectedSort = sortOptions[sortBy] || sortOptions.newest;
+  
+  // ✅ Auto-select distance sort when geoNear is active
+  const effectiveSortBy = geoNearStage ? 'distance' : sortBy;
+  const selectedSort = sortOptions[effectiveSortBy] || sortOptions.newest;
   aggregationPipeline.push({ $sort: selectedSort });
 
   // ✅ Pagination
@@ -551,7 +632,7 @@ productSchema.statics.searchWithVariants = async function (filters) {
       localField: 'seller',
       foreignField: '_id',
       as: 'seller',
-      pipeline: [{ $project: { sellerName: 1, businessDetails: 1, email: 1, mobile: 1 } }]
+      pipeline: [{ $project: { sellerName: 1, businessDetails: 1, email: 1, mobile: 1, district: 1 } }]
     }
   });
   aggregationPipeline.push({ $unwind: { path: '$seller', preserveNullAndEmptyArrays: true } });
@@ -572,7 +653,11 @@ productSchema.statics.searchWithVariants = async function (filters) {
   const products = await this.aggregate(aggregationPipeline);
   console.log(`✅ [MONGO] Found ${products.length} products for search: "${search}"`);
 
-  return products;
+  // ✅ Post-process: Round distance to 1 decimal place
+  return products.map(p => ({
+    ...p,
+    distance: p.distance ? Math.round(p.distance * 10) / 10 : undefined
+  }));
 };
 
 // ✅ Helper: Recalculate prices for catalog-linked products

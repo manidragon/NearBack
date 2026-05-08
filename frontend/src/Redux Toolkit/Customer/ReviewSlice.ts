@@ -22,7 +22,6 @@ export const fetchReviewsByProductId = createAsyncThunk<Review[],any>(
           },
         }
       );
-      console.log("fetch all reviews for product ", response.data);
       return response.data;
     } catch (error: any) {
       console.log("error - ", error.response?.data);
