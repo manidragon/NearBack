@@ -124,36 +124,73 @@ export const BasicInfoStep: React.FC<BasicInfoStepProps> = ({
     const label = `${attr.label}${attr.required ? ' *' : ''}`;
 
     switch (attr.type) {
-      case 'select':
-        return (
-          <FormControl fullWidth required={attr.required} error={attr.required && !value}>
-            <InputLabel>
-              {label}
-              {disabled && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '4px' }}>
-                  <Lock style={{ fontSize: '14px', color: '#9e9e9e' }} />
-                </span>
-              )}
-            </InputLabel>
-            <Select
-              value={value || ''}
-              label={label}
-              onChange={(e) => {
-                if (!disabled) onChange(e.target.value);
-              }}
-              disabled={disabled}
-              title={disabled ? "Inherited from catalog - cannot be changed" : ""}
-            >
-              <MenuItem value=""><em>Select {attr.label}</em></MenuItem>
-              {attr.options?.map((opt: string) => (
-                <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-              ))}
-            </Select>
-            {attr.required && !value && (
-              <FormHelperText error>This field is required (configured by admin)</FormHelperText>
-            )}
-          </FormControl>
-        );
+  case 'select': {
+  const OTHERS_VALUE = "__others__";
+
+  const rawValue = value == null ? '' : String(value);
+
+  const options: string[] = attr.options || [];
+
+  const isCustom =
+    rawValue !== '' &&
+    !options.includes(rawValue);
+
+  const selectValue = isCustom ? OTHERS_VALUE : rawValue;
+
+  return (
+    <Box>
+      {/* ✅ DROPDOWN */}
+      <TextField
+        fullWidth
+        select
+        label={label}
+        value={selectValue}
+        onChange={(e) => {
+          const val = e.target.value;
+
+          if (val === OTHERS_VALUE) {
+            onChange('__custom__');
+          } else {
+            onChange(val);
+          }
+        }}
+        disabled={disabled}
+      >
+        <MenuItem value="">
+          <em>Select {attr.label}</em>
+        </MenuItem>
+
+        {options.map((opt) => (
+          <MenuItem key={opt} value={opt}>
+            {opt}
+          </MenuItem>
+        ))}
+
+        <MenuItem disabled divider>
+          ──────────
+        </MenuItem>
+
+        <MenuItem value={OTHERS_VALUE}>
+          ✏️ Others (Enter manually)
+        </MenuItem>
+      </TextField>
+
+      {/* ✅ CUSTOM INPUT */}
+      {(selectValue === OTHERS_VALUE || rawValue === '__custom__') && (
+        <TextField
+          fullWidth
+          autoFocus
+          sx={{ mt: 1 }}
+          placeholder={`Enter ${attr.label}`}
+          value={rawValue === '__custom__' ? '' : rawValue}
+          onChange={(e) => {
+            onChange(e.target.value);
+          }}
+        />
+      )}
+    </Box>
+  );
+}
       case 'boolean':
         return (
           <FormControlLabel
@@ -408,14 +445,13 @@ export const BasicInfoStep: React.FC<BasicInfoStepProps> = ({
             <Grid size={{ xs: 12, sm: 4 }}>
               <FormControl fullWidth disabled>
                 <InputLabel>Sub-Category</InputLabel>
-                <Select
+               <Select
                   labelId="category2-label"
                   id="category2"
                   name="category2"
-                  // ✅ Use safe value helper to prevent MUI "out-of-range" error
                   value={getSafeSelectValue(formik.values.category2, levelTwoCategories)}
                   label="Sub-Category"
-                  disabled={!formik.values.category}
+                  disabled
                 >
                   <MenuItem value="">
                     <em>Select Sub-Category</em>
@@ -435,10 +471,9 @@ export const BasicInfoStep: React.FC<BasicInfoStepProps> = ({
                   labelId="category3-label"
                   id="category3"
                   name="category3"
-                  // ✅ Use safe value helper to prevent MUI "out-of-range" error
                   value={getSafeSelectValue(formik.values.category3, levelThreeCategories)}
                   label="Product Type"
-                  disabled={!formik.values.category2}
+                  disabled
                 >
                   <MenuItem value="">
                     <em>Select Product Type</em>

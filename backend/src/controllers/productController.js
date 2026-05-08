@@ -151,17 +151,19 @@ class SellerProductController {
       } = req.query;
 
       // ✅ Define params that should NOT be treated as specs
-      const KNOWN_PARAMS = new Set([
-        // Search & category
-        'q', 'query', 'search', 'category',
-        // Filter params
-        'colors', 'color', 'brand', 'size', 'stock',
-        'minPrice', 'maxPrice', 'minDiscount', 'discount',
-        // Pagination & sorting
-        'page', 'pageNumber', 'limit', 'sortBy', 'sort',
-        // Auth (if passed)
-        'jwt', 'token'
-      ]);
+     const KNOWN_PARAMS = new Set([
+  'q', 'query', 'search', 'category',
+  'colors', 'color', 'brand', 'size', 'stock',
+  'minPrice', 'maxPrice',
+
+  // ✅ ADD BOTH
+  'minDiscount',
+  'maxDiscount',
+
+  'discount',
+  'page', 'pageNumber', 'limit', 'sortBy', 'sort',
+  'jwt', 'token'
+]);
 
       // ✅ Safely collect ONLY true dynamic specs
       const specs = {};
@@ -186,18 +188,23 @@ class SellerProductController {
       const limitNum = limit ? parseInt(limit) : 20;
 
       // ✅ Build filters object
-      const filters = {
-        search: searchTerm,
-        category,
-        colors: colors?.split?.(',').map(c => c.trim()).filter(Boolean),
-        specs: Object.keys(specs).length > 0 ? specs : undefined,
-        minPrice: minPrice ? parseFloat(minPrice) : undefined,
-        maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
-        minDiscount: minDiscount ? parseFloat(minDiscount) : undefined,
-        sortBy: sortBy || sort || 'newest',
-        page: pageNum,
-        limit: limitNum
-      };
+     const filters = {
+  search: searchTerm,
+  category,
+  colors: (colors || color)?.split?.(',').map(c => c.trim()).filter(Boolean),
+
+  // ✅ ADD THIS
+  brand: brand ? brand.split(',').map(b => b.trim()) : undefined,
+
+  specs: Object.keys(specs).length > 0 ? specs : undefined,
+  minPrice: minPrice ? parseFloat(minPrice) : undefined,
+  maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
+  minDiscount: req.query.minDiscount ? parseFloat(req.query.minDiscount) : undefined,
+  maxDiscount: req.query.maxDiscount ? parseFloat(req.query.maxDiscount) : undefined,
+  sortBy: sortBy || sort || 'newest',
+  page: pageNum,
+  limit: limitNum
+};
 
       console.log('🔍 [CONTROLLER] Final filters sent to service:', {
         search: filters.search,
@@ -239,6 +246,52 @@ class SellerProductController {
     }
   }
 
+  // ✅ NEW: Dynamic price filters (ONLY AVAILABLE FROM DB)
+getPriceFilters = async (req, res) => {
+  try {
+    const Product = require("../models/Product");
+
+    const result = await Product.aggregate([
+      { $match: { isActive: true } },
+
+      {
+        $bucket: {
+          groupBy: "$minPrice",
+          boundaries: [0, 500, 1000, 2000, 5000, 10000, 50000],
+          default: "Other",
+          output: {
+            count: { $sum: 1 }
+          }
+        }
+      }
+    ]);
+
+    // ✅ Remove empty ranges
+    const priceFilters = result
+      .filter(r => r.count > 0 && r._id !== "Other")
+      .map(r => ({
+        min: r._id,
+        max: r._id + 500,
+        label: `₹${r._id} - ₹${r._id + 500}`,
+        count: r.count
+      }));
+
+    console.log("✅ Price filters:", priceFilters);
+
+    res.status(200).json({
+      success: true,
+      data: priceFilters
+    });
+
+  } catch (error) {
+    console.error("❌ Price filter error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch price filters"
+    });
+  }
+};
+
   // ✅ Wrapper for searchProduct route
   searchProduct = async (req, res, next) => {
     return this.searchProducts(req, res, next);
@@ -267,7 +320,7 @@ class SellerProductController {
         stack: error.stack,
         name: error.name
       });
-      return next(error);
+      return next(error);  
     }
   }
 }

@@ -7,15 +7,13 @@ import {
   Radio,
   RadioGroup,
   Checkbox,
-  TextField,
   Box,
   Typography,
-  CircularProgress,
   Collapse,
   IconButton,
 } from "@mui/material";
 
-import { price } from "../../../data/Filter/price";
+
 import { discount } from "../../../data/Filter/discount";
 import { useSearchParams } from "react-router-dom";
 import { useState, useEffect, useMemo } from "react";
@@ -47,8 +45,6 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
 
   const categoryAttributes = useAppSelector(selectCategoryAttributes);
   const categoryState = useAppSelector((state: any) => state.category);
-
-  // ✅ NEW: get products from redux
   const products = useAppSelector((state) => state.products.products);
 
   const [attributeSearches, setAttributeSearches] = useState<Record<string, string>>({});
@@ -65,42 +61,41 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
 
   const categoryId = propCategoryId || urlCategoryId || reduxCategoryId;
 
-  // ✅ Fetch attributes
   useEffect(() => {
     if (categoryId) {
       dispatch(fetchCategoryAttributes({ categoryId, includeInactive: false }));
     }
   }, [categoryId, dispatch]);
 
-  // ✅ ONLY show filterable attributes
   const allAttributes = useMemo(() => {
     return categoryAttributes
       .filter((attr: CategoryAttribute) => {
         return (
           attr.isActive &&
           attr.type === "select" &&
-          Array.isArray(attr.options) &&
-          attr.options.length > 0 &&
           attr.isFilterable === true
         );
       })
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   }, [categoryAttributes]);
 
-  // ✅ NEW: Extract available values from products
-  const getAvailableOptions = (attrName: string): string[] => {
-    const values = new Set<string>();
+  // ✅ FIXED COLOR LOGIC
+  const getAvailableColors = () => {
+    const map = new Map<string, string>();
 
     products?.forEach((product: any) => {
-      product?.variants?.forEach((variant: any) => {
-        const val = variant?.specifications?.[attrName];
-        if (val) {
-          values.add(String(val));
-        }
+      product?.availableColors?.forEach((color: string) => {
+        if (!color) return;
+
+        const normalized = color.trim().toLowerCase(); // normalize
+        const display =
+          normalized.charAt(0).toUpperCase() + normalized.slice(1); // Title Case
+
+        map.set(normalized, display);
       });
     });
 
-    return Array.from(values);
+    return Array.from(map.values());
   };
 
   const handleToggleSection = (key: string) => {
@@ -129,13 +124,11 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
   const getSelectedValues = (name: string) =>
     searchParams.get(name)?.split(",") || [];
 
-  const setSearch = (name: string, value: string) => {
-    setAttributeSearches((prev) => ({ ...prev, [name]: value }));
-  };
-
   const filterOptions = (options: string[], search: string) => {
     if (!search) return options;
-    return options.filter((o) => o.toLowerCase().includes(search.toLowerCase()));
+    return options.filter((o) =>
+      o.toLowerCase().includes(search.toLowerCase())
+    );
   };
 
   const renderHeader = (title: string, key: string) => (
@@ -150,6 +143,54 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
     </Box>
   );
 
+  // ✅ Dynamic price ranges from DB
+const getAvailablePriceRanges = () => {
+  if (!products || products.length === 0) return [];
+
+  const ranges = [
+    { min: 0, max: 500 },
+    { min: 500, max: 1000 },
+    { min: 1000, max: 2000 },
+    { min: 2000, max: 5000 },
+    { min: 5000, max: 10000 },
+    { min: 10000, max: 50000 },
+  ];
+
+  const availableRanges = ranges.filter((range) => {
+    return products.some((product: any) => {
+      return (
+        product.minPrice >= range.min &&
+        product.minPrice < range.max
+      );
+    });
+  });
+
+  return availableRanges;
+};
+
+
+// ✅ FILTER DISCOUNT BASED ON DB
+const getAvailableDiscountRanges = () => {
+  if (!products || products.length === 0) return [];
+
+  return discount.filter((range) => {
+    const [min, max] = range.value.split("-").map(Number);
+
+    return products.some((product: any) =>
+      product.variants?.some((variant: any) =>
+        variant.offers?.some((offer: any) => {
+          if (!offer.mrpPrice || !offer.sellingPrice) return false;
+
+          const discountPercent =
+            ((offer.mrpPrice - offer.sellingPrice) / offer.mrpPrice) * 100;
+
+          return discountPercent >= min && discountPercent <= max;
+        })
+      )
+    );
+  });
+};
+
   return (
     <div className="bg-white space-y-5">
 
@@ -163,21 +204,76 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
 
       <div className="px-6 space-y-5">
 
-        {/* ✅ DYNAMIC FILTERS */}
+        {/* ✅ COLOR FILTER */}
+        <section>
+          {renderHeader("Color", "color")}
+
+          <Collapse in={expandedSections.color}>
+            <Box sx={{ maxHeight: 200, overflow: "auto" }}>
+              {getAvailableColors().map((color) => (
+                <FormControlLabel
+                  key={color}
+                  control={
+                    <Checkbox
+                      checked={getSelectedValues("color").includes(color.toLowerCase())}
+                      onChange={(e) =>
+                        handleAttributeFilterChange(
+                          "color",
+                          color.toLowerCase(), // store normalized
+                          e.target.checked
+                        )
+                      }
+                    />
+                  }
+                  label={color} // display formatted
+                />
+              ))}
+            </Box>
+          </Collapse>
+
+          <Divider />
+        </section>
+
+        {/* ✅ ATTRIBUTE FILTERS */}
         {allAttributes.map((attr) => {
           const key = `attr_${attr.name}`;
           const selected = getSelectedValues(attr.name);
 
-          // ✅ NEW: Get only available values from products
-          const availableOptions = getAvailableOptions(attr.name);
+          let options: string[] = [];
+          const hasProducts = products && products.length > 0;
 
-          // ✅ Filter only available options
-          const options = filterOptions(
-            (attr.options || []).filter(opt => availableOptions.includes(opt)),
-            attributeSearches[attr.name] || ""
-          );
+          if (hasProducts) {
+            const productValues = new Set<string>();
 
-          // ✅ HIDE attribute if no values exist
+            products.forEach((product: any) => {
+              const value = product?.highlights?.[attr.name];
+
+              if (value !== undefined && value !== null) {
+                if (typeof value === "boolean") {
+                  productValues.add(value ? "Yes" : "No");
+                } else {
+                  productValues.add(String(value).trim());
+                }
+              }
+
+              product?.variants?.forEach((variant: any) => {
+                const specValue =
+                  variant?.specifications?.[attr.name] ||
+                  variant?.[attr.name];
+
+                if (specValue) {
+                  productValues.add(String(specValue).trim());
+                }
+              });
+            });
+
+            options = Array.from(productValues);
+          } else {
+            options = attr.options || [];
+          }
+
+          options = filterOptions(options, attributeSearches[attr.name] || "");
+
           if (options.length === 0) return null;
 
           return (
@@ -185,15 +281,6 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
               {renderHeader(attr.label, key)}
 
               <Collapse in={expandedSections[key]}>
-                <TextField
-                  size="small"
-                  fullWidth
-                  placeholder={`Search ${attr.label}`}
-                  value={attributeSearches[attr.name] || ""}
-                  onChange={(e) => setSearch(attr.name, e.target.value)}
-                  sx={{ mb: 1 }}
-                />
-
                 <Box sx={{ maxHeight: 200, overflow: "auto" }}>
                   {options.map((opt) => (
                     <FormControlLabel
@@ -202,7 +289,11 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
                         <Checkbox
                           checked={selected.includes(opt)}
                           onChange={(e) =>
-                            handleAttributeFilterChange(attr.name, opt, e.target.checked)
+                            handleAttributeFilterChange(
+                              attr.name,
+                              opt,
+                              e.target.checked
+                            )
                           }
                         />
                       }
@@ -217,41 +308,48 @@ const FilterSection: React.FC<FilterSectionProps> = ({ categoryId: propCategoryI
           );
         })}
 
-        {/* LOADING */}
-        {categoryAttributes.length === 0 && (
-          <Box textAlign="center">
-            <CircularProgress size={24} />
-          </Box>
-        )}
-
         {/* PRICE */}
-        <section>
-          {renderHeader("Price", "price")}
-          <Collapse in={expandedSections.price}>
-            <RadioGroup
-              onChange={(e) => {
-                searchParams.set("price", e.target.value);
-                setSearchParams(searchParams);
-              }}
-            >
-              {price.map((p) => (
-                <FormControlLabel key={p.value} value={p.value} control={<Radio />} label={p.name} />
-              ))}
-            </RadioGroup>
-          </Collapse>
-        </section>
+      {/* ✅ PRICE (DYNAMIC - FIXED) */}
+<section>
+  {renderHeader("Price", "price")}
+
+  <Collapse in={expandedSections.price}>
+    <RadioGroup
+      onChange={(e) => {
+        const [min, max] = e.target.value.split("-");
+        searchParams.set("minPrice", min);
+        searchParams.set("maxPrice", max);
+        setSearchParams(searchParams);
+      }}
+    >
+      {getAvailablePriceRanges().map((range, i) => (
+        <FormControlLabel
+          key={i}
+          value={`${range.min}-${range.max}`}
+          control={<Radio />}
+          label={`₹${range.min} - ₹${range.max}`}
+        />
+      ))}
+    </RadioGroup>
+  </Collapse>
+</section>
 
         {/* DISCOUNT */}
         <section>
           {renderHeader("Discount", "discount")}
           <Collapse in={expandedSections.discount}>
-            <RadioGroup
-              onChange={(e) => {
-                searchParams.set("discount", e.target.value);
-                setSearchParams(searchParams);
-              }}
-            >
-              {discount.map((d) => (
+           <RadioGroup
+  onChange={(e) => {
+    const value = e.target.value;      // "10-20"
+    const [min, max] = value.split("-"); // ["10", "20"]
+
+    searchParams.set("minDiscount", min);
+    searchParams.set("maxDiscount", max);
+
+    setSearchParams(searchParams);
+  }}
+>
+              {getAvailableDiscountRanges().map((d) => (
                 <FormControlLabel key={d.value} value={d.value} control={<Radio />} label={d.name} />
               ))}
             </RadioGroup>

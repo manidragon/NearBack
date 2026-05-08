@@ -485,6 +485,83 @@ productSchema.statics.searchWithVariants = async function (filters) {
     aggregationPipeline.push({ $match: { minPrice: priceMatch } });
   }
 
+  
+  // ✅ Discount filter (based on offer mrpPrice vs sellingPrice)
+if (filters.minDiscount !== undefined || filters.maxDiscount !== undefined) {
+  const minD = filters.minDiscount ?? 0;
+  const maxD = filters.maxDiscount ?? 100;
+
+  aggregationPipeline.push({
+    $addFields: {
+      variants: {
+        $map: {
+          input: '$variants',
+          as: 'v',
+          in: {
+            $mergeObjects: [
+              '$$v',
+              {
+                offers: {
+                  $filter: {
+                    input: { $ifNull: ['$$v.offers', []] },
+                    as: 'o',
+                    cond: {
+                      $and: [
+                        '$$o.isActive',
+                        { $gt: ['$$o.mrpPrice', 0] },
+                        {
+                          $gte: [
+                            {
+                              $multiply: [
+                                {
+                                  $divide: [
+                                    { $subtract: ['$$o.mrpPrice', '$$o.sellingPrice'] },
+                                    '$$o.mrpPrice'
+                                  ]
+                                },
+                                100
+                              ]
+                            },
+                            minD
+                          ]
+                        },
+                        {
+                          $lte: [
+                            {
+                              $multiply: [
+                                {
+                                  $divide: [
+                                    { $subtract: ['$$o.mrpPrice', '$$o.sellingPrice'] },
+                                    '$$o.mrpPrice'
+                                  ]
+                                },
+                                100
+                              ]
+                            },
+                            maxD
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  });
+
+  // ✅ Remove products where NO variant has qualifying offers after discount filter
+  aggregationPipeline.push({
+    $match: {
+      'variants.offers.0': { $exists: true }
+    }
+  });
+}
+  
+
   // ✅ Variant color filter
   if (colors?.length > 0) {
     aggregationPipeline.push({
@@ -496,18 +573,27 @@ productSchema.statics.searchWithVariants = async function (filters) {
   }
 
   // ✅ Dynamic spec filters
-  if (specs && typeof specs === 'object') {
-    Object.entries(specs).forEach(([key, values]) => {
-      if (Array.isArray(values) && values.length > 0) {
-        const stringValues = values.map(v => String(v).trim()).filter(Boolean);
-        if (stringValues.length > 0) {
-          aggregationPipeline.push({
-            $match: { [`variants.specifications.${key}`]: { $in: stringValues } }
-          });
+ // ✅ FIXED: Dynamic spec filters (support BOTH highlights + specifications)
+if (specs && typeof specs === 'object') {
+  Object.entries(specs).forEach(([key, values]) => {
+    if (Array.isArray(values) && values.length > 0) {
+
+      const regexValues = values.map(
+        v => new RegExp(`^${String(v).trim()}$`, 'i')
+      );
+
+      aggregationPipeline.push({
+        $match: {
+          $or: [
+            { [`highlights.${key}`]: { $in: regexValues } },           // ✅ MAIN FIX
+            { [`variants.specifications.${key}`]: { $in: regexValues } } // fallback
+          ]
         }
-      }
-    });
-  }
+      });
+
+    }
+  });
+}
 
   // ✅ Filter to only include products with active variants AND active offers
   aggregationPipeline.push({
@@ -529,6 +615,9 @@ productSchema.statics.searchWithVariants = async function (filters) {
   aggregationPipeline.push({
     $match: { activeVariants: { $ne: [], $exists: true } }
   });
+
+
+  
 
   // ✅ Sort options - support sorting by best offer price
   const sortOptions = {

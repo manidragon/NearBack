@@ -1,12 +1,14 @@
-// D:\Mani\Code with Zosh\Backup\source code\frontend\src\data\Filter\discount.ts
-export const discount=[
-    {"name": "10% and above", "value": 10},
-    {"name": "20% and above", "value": 20},
-    {"name": "30% and above", "value": 30},
-    {"name": "40% and above", "value": 40},
-    {"name": "50% and above", "value": 50},
-    {"name": "60% and above", "value": 60},
-    {"name": "70% and above", "value": 70},
-    {"name": "80% and above", "value": 80}
-  ]
-  
+// ✅ UPDATED DISCOUNT FORMAT (RANGE BASED)
+
+export const discount = [
+  { name: "0% - 10%", value: "0-10" },
+  { name: "10% - 20%", value: "10-20" },
+  { name: "20% - 30%", value: "20-30" },
+  { name: "30% - 40%", value: "30-40" },
+  { name: "40% - 50%", value: "40-50" },
+  { name: "50% - 60%", value: "50-60" },
+  { name: "60% - 70%", value: "60-70" },
+  { name: "70% - 80%", value: "70-80" },
+  { name: "80% - 90%", value: "80-90" },
+  { name: "90% - 100%", value: "90-100" },
+];

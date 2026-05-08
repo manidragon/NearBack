@@ -25,4 +25,7 @@ router.get('/', (req, res, next) => {
 // ✅ This was already correct
 router.get('/:productId', productController.getProductById);
 
+router.get("/price-filters", productController.getPriceFilters);
+
+
 module.exports = router;

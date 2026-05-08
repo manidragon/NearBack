@@ -120,39 +120,93 @@ const renderAttributeField = (
   const label = `${attr.label}${attr.required ? ' *' : ''}`;
 
   switch (attr.type) {
-    case 'select':
-      return (
-        <FormControl fullWidth required={attr.required}>
-          <InputLabel>
-            {label}
-            {disabled && <Lock fontSize="small" sx={{ ml: 0.5, color: 'text.disabled' }} />}
-          </InputLabel>
-          <Select
-            value={value == null || value === '' ? '' : String(value)}
-            label={label}
-            onChange={(e: SelectChangeEvent<unknown>) => {
-              const newValue = e.target.value;
-              if (newValue !== undefined && newValue !== null) {
-                onChange(newValue as string);
-              }
-            }}
-            disabled={disabled}
-            title={disabled ? "Inherited from catalog - cannot be changed" : ""}
-            displayEmpty
-            error={value != null && attr.options && !attr.options.includes(String(value))}
-          >
-            <MenuItem value="" disabled>
-              <em>Select {attr.label}</em>
-            </MenuItem>
-            {attr.options?.map((opt: string) => (
-              <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-            ))}
-          </Select>
-          {value != null && attr.options && !attr.options.includes(String(value)) && (
-            <FormHelperText error>Invalid value selected</FormHelperText>
+case 'select': {
+  const OTHERS_VALUE = "__others__";
+
+  const rawValue = value == null ? '' : String(value);
+
+  const options: string[] = attr.options || [];
+
+  const isCustom =
+    rawValue !== '' &&
+    rawValue !== '__custom__' &&
+    !options.includes(rawValue);
+
+  const selectValue =
+    isCustom || rawValue === '__custom__'
+      ? OTHERS_VALUE
+      : rawValue;
+
+  return (
+    <Box>
+      {/* ✅ DROPDOWN */}
+      <FormControl fullWidth required={attr.required}>
+        <InputLabel>
+          {label}
+          {disabled && (
+            <Lock
+              fontSize="small"
+              sx={{ ml: 0.5, color: 'text.disabled' }}
+            />
           )}
-        </FormControl>
-      );
+        </InputLabel>
+
+        <Select
+          value={selectValue}
+          label={label}
+          onChange={(e: SelectChangeEvent<unknown>) => {
+            const val = String(e.target.value);
+
+            if (val === OTHERS_VALUE) {
+              onChange('__custom__');
+            } else {
+              onChange(val);
+            }
+          }}
+          disabled={disabled}
+        >
+          <MenuItem value="">
+            <em>Select {attr.label}</em>
+          </MenuItem>
+
+          {options.map((opt: string) => (
+            <MenuItem key={opt} value={opt}>
+              {opt}
+            </MenuItem>
+          ))}
+
+          <MenuItem disabled divider>
+            ──────────
+          </MenuItem>
+
+          <MenuItem value={OTHERS_VALUE}>
+            ✏️ Others (Enter manually)
+          </MenuItem>
+        </Select>
+      </FormControl>
+
+      {/* ✅ CUSTOM INPUT */}
+      {(selectValue === OTHERS_VALUE ||
+        rawValue === '__custom__') && (
+        <TextField
+          fullWidth
+          autoFocus
+          sx={{ mt: 1 }}
+          placeholder={`Enter ${attr.label}`}
+          value={
+            rawValue === '__custom__'
+              ? ''
+              : rawValue
+          }
+          onChange={(e) => {
+            onChange(e.target.value);
+          }}
+        />
+      )}
+    </Box>
+  );
+}
+
     case 'boolean':
       return (
         <FormControlLabel
