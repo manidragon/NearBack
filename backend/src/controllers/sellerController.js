@@ -14,7 +14,6 @@ class SellerController {
     try {
       const jwt = req.headers.authorization.split(" ")[1];
       const seller = await SellerService.getSellerProfile(jwt);
-      // const seller=req.seller
 
       res.status(200).json(seller);
     } catch (err) {
@@ -25,49 +24,46 @@ class SellerController {
   }
 
   async createSeller(req, res) {
-  try {
-    const { email, otp, ...sellerData } = req.body;
+    try {
+      const { email, otp, ...sellerData } = req.body;
 
-    // 🔑 Verify OTP FIRST (mandatory)
-    const verificationCode = await VerificationService.getVerificationCodeByEmail(email);
-    if (!verificationCode || verificationCode.otp !== otp) {
-      throw new SellerError("Invalid or expired OTP");
-    }
-
-    // Check if seller already exists
-    const existingSeller = await Seller.findOne({ email });
-    if (existingSeller) {
-      // Delete OTP even if seller exists
-      await VerificationService.deleteVerificationCode(verificationCode._id);
-      throw new SellerError("Seller already exists with this email");
-    }
-
-    // 🔑 Delete used OTP
-    await VerificationService.deleteVerificationCode(verificationCode._id);
-
-    // 👇 Create seller (accountStatus defaults to PENDING_VERIFICATION)
-    const newSeller = await SellerService.createSeller({
-      email,
-      ...sellerData
-    });
-
-    // ✅ Return success WITHOUT JWT (no auto-login)
-    return res.status(201).json({
-      message: "Seller registration successful. Your application is pending admin approval.",
-      seller: {
-        _id: newSeller._id,
-        email: newSeller.email,
-        sellerName: newSeller.sellerName,
-        accountStatus: newSeller.accountStatus
+      // 🔑 Verify OTP FIRST (mandatory)
+      const verificationCode = await VerificationService.getVerificationCodeByEmail(email);
+      if (!verificationCode || verificationCode.otp !== otp) {
+        throw new SellerError("Invalid or expired OTP");
       }
-    });
 
-  } catch (err) {
-    res
-      .status(err instanceof SellerError ? 400 : 500)
-      .json({ error: err.message });
+      // Check if seller already exists
+      const existingSeller = await Seller.findOne({ email });
+      if (existingSeller) {
+        await VerificationService.deleteVerificationCode(verificationCode._id);
+        throw new SellerError("Seller already exists with this email");
+      }
+
+      // 🔑 Delete used OTP
+      await VerificationService.deleteVerificationCode(verificationCode._id);
+
+      const newSeller = await SellerService.createSeller({
+        email,
+        ...sellerData
+      });
+
+      return res.status(201).json({
+        message: "Seller registration successful. Your application is pending admin approval.",
+        seller: {
+          _id: newSeller._id,
+          email: newSeller.email,
+          sellerName: newSeller.sellerName,
+          accountStatus: newSeller.accountStatus
+        }
+      });
+
+    } catch (err) {
+      res
+        .status(err instanceof SellerError ? 400 : 500)
+        .json({ error: err.message });
+    }
   }
-}
 
   async getSellerById(req, res) {
     try {
@@ -77,6 +73,45 @@ class SellerController {
       res
         .status(err instanceof SellerError ? 404 : 500)
         .json({ message: err.message });
+    }
+  }
+
+  // ✅ UPDATED: now returns totalReviews + averageRating per product
+  async getSellerProductsById(req, res) {
+    try {
+      const Product = require("../models/Product");
+      const Review = require("../models/Review");
+
+      const sellerId = req.params.id;
+
+      // Fetch all active products that have at least one offer from this seller
+      const products = await Product.find({
+        "variants.offers.seller": sellerId,
+        isActive: true
+      }).lean();
+
+      // For each product, count reviews and compute average rating
+      const productsWithReviews = await Promise.all(
+        products.map(async (product) => {
+          const reviews = await Review.find(
+            { product: product._id },
+            { rating: 1 }   // only fetch rating field — faster
+          ).lean();
+
+          const totalReviews = reviews.length;
+          const averageRating =
+            totalReviews > 0
+              ? reviews.reduce((sum, r) => sum + (r.rating || 0), 0) /
+                totalReviews
+              : 0;
+
+          return { ...product, totalReviews, averageRating };
+        })
+      );
+
+      res.status(200).json(productsWithReviews);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
     }
   }
 
@@ -108,7 +143,7 @@ class SellerController {
   async deleteSeller(req, res) {
     try {
       await SellerService.deleteSeller(req.params.id);
-      res.status(204).send(); // No Content
+      res.status(204).send();
     } catch (err) {
       res
         .status(err instanceof SellerError ? 404 : 500)
@@ -118,7 +153,7 @@ class SellerController {
 
   async verifyEmail(req, res) {
     try {
-      const { email, otp } = req.body; // Expecting email and OTP in request body
+      const { email, otp } = req.body;
       const seller = await SellerService.verifyEmail(email, otp);
       res.status(200).json(seller);
     } catch (err) {
@@ -145,13 +180,8 @@ class SellerController {
   async sendLoginOtp(req, res) {
     try {
       const { email } = req.body;
-      // Reuse logic from AuthService or create new
       const otp = generateOTP();
       await VerificationService.createVerificationCode(otp, email);
-
-      // Optionally send email
-      // await sendVerificationEmail(...);
-
       return res.status(200).json({ message: "OTP sent successfully" });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -167,7 +197,6 @@ class SellerController {
         throw new SellerError("Invalid email or password");
       }
 
-      // ✅ CRITICAL FIX: Check account status BEFORE OTP verification
       if (seller.accountStatus !== "ACTIVE") {
         let message = "Your account is not active.";
         if (seller.accountStatus === "PENDING_VERIFICATION") {
@@ -189,10 +218,8 @@ class SellerController {
         throw new Error("Invalid OTP");
       }
 
-      // 🔑 Delete used OTP
       await VerificationCode.deleteOne({ _id: verificationCode._id });
 
-      // ✅ Include ROLE in JWT
       const token = jwtProvider.createJwt({
         email: seller.email,
         id: seller._id,
@@ -212,8 +239,6 @@ class SellerController {
         .json({ message: err.message });
     }
   }
-
-
 }
 
 module.exports = new SellerController();

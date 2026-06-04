@@ -9,6 +9,7 @@ import Payment from "../seller/pages/Payment/Payment";
 import TransactionTable from "../seller/pages/Payment/TransactionTable";
 import Stock from "../seller/pages/Stock/Stock";
 import OfflineSale from "../seller/pages/OfflineSale/OfflineSale";
+import Enquiry from "../seller/pages/Enquiry/Enquiry";
 
 const SellerRoutes = () => {
   return (
@@ -22,6 +23,7 @@ const SellerRoutes = () => {
       <Route path="/transaction" element={<TransactionTable />} />
       <Route path="/stock" element={<Stock />} />
       <Route path="/offline-sale" element={<OfflineSale />} />
+      <Route path="/enquiry" element={<Enquiry />} />
     </Routes>
   );
 };

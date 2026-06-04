@@ -1,6 +1,6 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Seller\sellerAuthenticationSlice.ts
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import type { PayloadAction } from '@reduxjs/toolkit'; 
+import type { PayloadAction } from '@reduxjs/toolkit';
 import { api } from '../../Config/Api';
 import { type Seller } from '../../types/sellerTypes';
 import axios from 'axios';
@@ -17,7 +17,7 @@ interface SellerAuthState {
   loading: boolean;
   jwt: string | null;
   sellerCreated: string | null;
-}
+}  
 
 const initialState: SellerAuthState = {
   otpSent: false,
@@ -57,21 +57,21 @@ export const verifyLoginOtp = createAsyncThunk(
       });
       console.log("login seller success - ", response.data);
       localStorage.setItem("jwt", response.data.jwt);
-      
+
       // ✅ Only navigate if login was successful
       if (data.navigate) {
         data.navigate("/seller");
       }
-      
+
       return response.data;
     } catch (error: any) {
       console.log("error", error.response?.data);
-      
+
       // ✅ Handle 403 (forbidden) status for pending accounts
       if (error.response?.status === 403) {
         return rejectWithValue(error.response.data.message || 'Access denied');
       }
-      
+
       return rejectWithValue(
         error.response?.data?.message ||
         error.response?.data?.error ||
@@ -90,11 +90,11 @@ export const createSeller = createAsyncThunk<
   async ({ sellerData, navigate }, { rejectWithValue }) => {
     try {
       const response = await api.post<any>('/sellers', sellerData);
-      
+
       // ✅ NO JWT storage or navigation (admin approval required)
       // localStorage.setItem('jwt', response.data.jwt);
       // if (navigate) navigate('/seller');
-      
+
       return response.data;
     } catch (error: any) {
       if (axios.isAxiosError(error) && error.response) {

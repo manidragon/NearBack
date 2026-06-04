@@ -1,4 +1,8 @@
-import { createSlice, createAsyncThunk, type PayloadAction } from "@reduxjs/toolkit";
+import {
+  createSlice,
+  createAsyncThunk,
+  type PayloadAction,
+} from "@reduxjs/toolkit";
 import {
   type ApiResponse,
   type CreateReviewRequest,
@@ -9,30 +13,30 @@ import { api } from "../../Config/Api";
 
 const API_URL = "/api/reviews";
 
-// Async thunks
-export const fetchReviewsByProductId = createAsyncThunk<Review[],any>(
+// ✅ FETCH REVIEWS BY PRODUCT ID
+export const fetchReviewsByProductId = createAsyncThunk<Review[], any>(
   "review/fetchReviewsByProductId",
   async ({ productId }, { rejectWithValue }) => {
     try {
-      const response = await api.get(
-        `${API_URL}/product/${productId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("jwt")}`,
-          },
-        }
-      );
+      const response = await api.get(`${API_URL}/product/${productId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("jwt")}`,
+        },
+      });
       return response.data;
     } catch (error: any) {
       console.log("error - ", error.response?.data);
-      return rejectWithValue(error.response?.data || "Failed to fetch reviews");
+      return rejectWithValue(
+        error.response?.data || "Failed to fetch reviews"
+      );
     }
   }
 );
 
-export const createReview = createAsyncThunk<Review,any>(
+// ✅ CREATE REVIEW — navigates BACK to order details page after success
+export const createReview = createAsyncThunk<Review, any>(
   "review/createReview",
-  async ({ productId, review, jwt,navigate }, { rejectWithValue }) => {
+  async ({ productId, review, jwt, navigate }, { rejectWithValue }) => {
     try {
       const response = await api.post(
         `${API_URL}/product/${productId}`,
@@ -43,16 +47,23 @@ export const createReview = createAsyncThunk<Review,any>(
           },
         }
       );
-      navigate(`/reviews/${productId}`);
-      console.log("create reviews for product ", response.data);
+
+      console.log("review created: ", response.data);
+
+      // ✅ Go BACK to OrderDetails so the review appears immediately
+      navigate(-1);
+
       return response.data;
     } catch (error: any) {
-      console.log("error ", error);
-      return rejectWithValue(error.response?.data || "Failed to create review");
+      console.log("create review error: ", error);
+      return rejectWithValue(
+        error.response?.data || "Failed to create review"
+      );
     }
   }
 );
 
+// ✅ UPDATE REVIEW
 export const updateReview = createAsyncThunk<
   Review,
   { reviewId: number; review: CreateReviewRequest; jwt: string },
@@ -61,41 +72,43 @@ export const updateReview = createAsyncThunk<
   "review/updateReview",
   async ({ reviewId, review, jwt }, { rejectWithValue }) => {
     try {
-      const response = await api.patch(
-        `${API_URL}/${reviewId}`,
-        review,
-        {
-          headers: {
-            Authorization: `Bearer ${jwt}`,
-          },
-        }
-      );
-      console.log("updated reviews for product ", response.data);
+      const response = await api.patch(`${API_URL}/${reviewId}`, review, {
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+        },
+      });
+      console.log("updated review: ", response.data);
       return response.data;
     } catch (error: any) {
       console.log("error ", error);
-      return rejectWithValue(error.response?.data || "Failed to update review");
+      return rejectWithValue(
+        error.response?.data || "Failed to update review"
+      );
     }
   }
 );
 
-export const deleteReview = createAsyncThunk<
-  ApiResponse,any
->("review/deleteReview", async ({ reviewId, jwt }, { rejectWithValue }) => {
-  try {
-    const response = await api.delete(`${API_URL}/${reviewId}`, {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-      },
-    });
-    return response.data;
-  } catch (error: any) {
-    console.log("error ", error);
-    return rejectWithValue(error.response?.data || "Failed to delete review");
+// ✅ DELETE REVIEW
+export const deleteReview = createAsyncThunk<ApiResponse, any>(
+  "review/deleteReview",
+  async ({ reviewId, jwt }, { rejectWithValue }) => {
+    try {
+      const response = await api.delete(`${API_URL}/${reviewId}`, {
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      console.log("error ", error);
+      return rejectWithValue(
+        error.response?.data || "Failed to delete review"
+      );
+    }
   }
-});
+);
 
-// Initial state
+// ✅ INITIAL STATE
 const initialState: ReviewState = {
   reviews: [],
   loading: false,
@@ -105,7 +118,7 @@ const initialState: ReviewState = {
   reviewDeleted: false,
 };
 
-// Slice
+// ✅ SLICE
 const reviewSlice = createSlice({
   name: "review",
   initialState,
@@ -121,6 +134,7 @@ const reviewSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      // FETCH REVIEWS
       .addCase(fetchReviewsByProductId.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -128,6 +142,7 @@ const reviewSlice = createSlice({
       .addCase(
         fetchReviewsByProductId.fulfilled,
         (state, action: PayloadAction<Review[]>) => {
+          // ✅ Replace reviews array with fresh data from backend
           state.reviews = action.payload;
           state.loading = false;
         }
@@ -136,6 +151,8 @@ const reviewSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+
+      // CREATE REVIEW
       .addCase(createReview.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -144,6 +161,8 @@ const reviewSlice = createSlice({
       .addCase(
         createReview.fulfilled,
         (state, action: PayloadAction<Review>) => {
+          // ✅ Push the newly created review into the array immediately
+          // so it shows up in OrderDetails without waiting for a refetch
           state.reviews.push(action.payload);
           state.loading = false;
           state.reviewCreated = true;
@@ -154,6 +173,8 @@ const reviewSlice = createSlice({
         state.error = action.payload as string;
         state.reviewCreated = false;
       })
+
+      // UPDATE REVIEW
       .addCase(updateReview.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -177,6 +198,8 @@ const reviewSlice = createSlice({
         state.error = action.payload as string;
         state.reviewUpdated = false;
       })
+
+      // DELETE REVIEW
       .addCase(deleteReview.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -192,11 +215,10 @@ const reviewSlice = createSlice({
       .addCase(deleteReview.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
-        state.reviewDeleted = false;
+        state.reviewDeleted = false; 
       });
   },
 });
 
 export default reviewSlice.reducer;
 export const { resetReviewState } = reviewSlice.actions;
-

@@ -30,23 +30,29 @@ const DrawerList = ({ toggleDrawer,menu,menu2 }: DrawerListProps) => {
     const navigate = useNavigate();
 
     const handleLogout = () => {
-        dispatch(performLogout())
+    localStorage.removeItem("jwt");
+
+    dispatch(performLogout());
+
+    window.location.href = "/";
+}
+
+const handleClick = (item: any) => () => {
+
+    if (item.name === "Logout") {
+        handleLogout();
+        return;
     }
 
-    const handleClick = (item: any)=>() => {
+    navigate(item.path);
 
-        if (item.name === "Logout") {
-            handleLogout()
-
-        }
-        navigate(item.path);
-        if(toggleDrawer) toggleDrawer(false)();
-    }
+    if (toggleDrawer) toggleDrawer(false)();
+}
     return (
         <div className="h-full">
             <div
                 className="flex flex-col  justify-between  h-full w-[300px] border-r py-5"
-                
+
             >
                 <div>
                     <div className="space-y-2">

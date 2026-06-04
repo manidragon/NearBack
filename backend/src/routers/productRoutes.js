@@ -1,27 +1,85 @@
 // D:\Mani\Code with Zosh\Backup\source code\backend\src\routers\productRoutes.js
+
 const express = require('express');
-const productController = require('../controllers/productController');
 const router = express.Router();
 
-// ✅ FIX: Use correct method names that exist in controller
+const productController =
+  require('../controllers/productController');
 
-// Search for products by query
-// ✅ Changed: searchProduct → searchProducts (add 's')
-router.get('/search', productController.searchProducts);
 
-// Get all products with filters
-// ✅ Option 1: Use searchProducts with empty filters (recommended)
-router.get('/', (req, res, next) => {
-  // Delegate to searchProducts with no search query
-  req.query = { ...req.query, page: req.query.page || 0, limit: req.query.limit || 20 };
-  productController.searchProducts(req, res, next).catch(next);
-});
+/* =========================================================
+   ✅ SEARCH PRODUCTS
+========================================================= */
+router.get(
+  '/search',
+  productController.searchProducts
+);
 
-// Get product by ID
-// ✅ This was already correct
-router.get('/:productId', productController.getProductById);
 
-router.get("/price-filters", productController.getPriceFilters);
+/* =========================================================
+   ✅ GET ALL PRODUCTS
+========================================================= */
+router.get(
+  '/',
+  async (req, res, next) => {
+
+    try {
+
+      // ✅ Default pagination
+      req.query = {
+        ...req.query,
+        page: req.query.page || 0,
+        limit: req.query.limit || 20
+      };
+
+      await productController.searchProducts(
+        req,
+        res,
+        next
+      );
+
+    } catch (error) {
+
+      next(error);
+    }
+  }
+);
+
+
+/* =========================================================
+   ✅ PRICE FILTERS
+========================================================= */
+router.get(
+  '/price-filters',
+  productController.getPriceFilters
+);
+
+
+/* =========================================================
+   ✅ SELLER PRODUCTS
+========================================================= */
+router.get(
+  '/seller-products',
+  productController.getSellerProducts
+);
+
+
+/* =========================================================
+   ✅ SELLER CATALOG OFFERS
+========================================================= */
+router.get(
+  '/catalog-offers',
+  productController.getSellerCatalogOffers
+);
+
+
+/* =========================================================
+   ✅ GET PRODUCT BY ID
+========================================================= */
+router.get(
+  '/:productId',
+  productController.getProductById
+);
 
 
 module.exports = router;

@@ -146,6 +146,54 @@ class SellerProductController {
     }
   }
 
+  // ✅ NEW: PRICE FILTERS
+getPriceFilters = async (req, res) => {
+  try {
+
+    const filters = [
+      {
+        label: "Below ₹10,000",
+        min: 0,
+        max: 10000
+      },
+      {
+        label: "₹10,000 - ₹20,000",
+        min: 10000,
+        max: 20000
+      },
+      {
+        label: "₹20,000 - ₹30,000",
+        min: 20000,
+        max: 30000
+      },
+      {
+        label: "₹30,000 - ₹50,000",
+        min: 30000,
+        max: 50000
+      },
+      {
+        label: "Above ₹50,000",
+        min: 50000,
+        max: null
+      }
+    ];
+
+    return res.status(200).json({
+      success: true,
+      data: filters
+    });
+
+  } catch (error) {
+
+    console.error("❌ Get price filters error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch price filters"
+    });
+  } 
+} 
+
   deleteProduct = async (req, res) => {
     try {
       const { productId } = req.params;

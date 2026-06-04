@@ -18,21 +18,21 @@ const ChatBot = ({handleClose,productId}:ChatBotProps) => {
     const dispatch = useAppDispatch();
     const [prompt, setPrompt] = useState("");
     const chatContainerRef = useRef<HTMLDivElement>(null);
-  
+
     const aiChatBot=useAppSelector(state=>state.aiChatBot);
 
     console.log("ai chat Bot",aiChatBot)
 
     const handleGivePrompt = (e:any) => {
         e.stopPropagation()
-        
+
         // ✅ FIXED: productId is now string, no conversion needed
         dispatch(askProductQuestion({
             productId: productId || "",  // ✅ Pass string directly (fallback to empty string if undefined)
             question:prompt
         }))
 
-        setPrompt("")
+        setPrompt("") 
 
         console.log("prompt ", productId, prompt)
     };
@@ -40,13 +40,13 @@ const ChatBot = ({handleClose,productId}:ChatBotProps) => {
     const handlePromptChange = (e: any) => {
         setPrompt(e.target.value);
     };
-    
+
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollIntoView({ behavior: "smooth" });
         }
     }, [aiChatBot.messages]);
-    
+
     return (
         <div className="rounded-lg">
             <div className="w-full lg:w-[40vw] h-[82vh] shadow-2xl bg-white z-50 rounded-lg">
@@ -56,7 +56,7 @@ const ChatBot = ({handleClose,productId}:ChatBotProps) => {
                         <p>Assistant</p>
                     </div>
                     <div>
-                        <IconButton 
+                        <IconButton
                         onClick={handleClose}
                         color="primary"
                         >
@@ -70,7 +70,7 @@ const ChatBot = ({handleClose,productId}:ChatBotProps) => {
                         Welcome to Near Look AI Assistant, you can
                         {productId ? ` query about this Product: ${productId}` : " query about your cart, and order history here"}
                     </p>
-                    
+
                     { aiChatBot.messages.map((item:any, index:number) =>
                         item.role == "user" ? (
                             <div ref={chatContainerRef} className="self-end" key={index}>

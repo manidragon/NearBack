@@ -224,23 +224,23 @@ const renderLocationSelector = () => {
   // ✅ Helper: Build menu items array (avoids JSX syntax issues)
   const getMenuItems = () => {
     const items: React.ReactNode[] = [];
-    
+
     // 1. Current Location option
     items.push(
-      <MenuItem 
+      <MenuItem
         key="current-location"
-        onClick={() => handleLocationSelect('current')} 
-        disabled={locationLoading} 
+        onClick={() => handleLocationSelect('current')}
+        disabled={locationLoading}
         sx={{ gap: 1 }}
       >
         <LocationOnIcon sx={{ fontSize: 18, color: '#00927c' }} />
         <Typography variant="body2">Use Current Location</Typography>
       </MenuItem>
     );
-    
+
     // 2. Divider
     items.push(<Divider key="divider-1" />);
-    
+
     // 3. District selector
     items.push(
       <MenuItem key="district-select" sx={{ px: 2, py: 1, minWidth: 280 }}>
@@ -260,21 +260,21 @@ const renderLocationSelector = () => {
         </TextField>
       </MenuItem>
     );
-    
+
     // 4. Clear Location (conditional)
     if (locationMode) {
       items.push(<Divider key="divider-2" />);
       items.push(
-        <MenuItem 
-          key="clear-location" 
-          onClick={handleClearLocation} 
+        <MenuItem
+          key="clear-location"
+          onClick={handleClearLocation}
           sx={{ color: 'error.main', justifyContent: 'center' }}
         >
           <Typography variant="body2">Clear Location</Typography>
         </MenuItem>
       );
     }
-    
+
     // 5. Loading state (conditional)
     if (locationLoading) {
       items.push(
@@ -284,7 +284,7 @@ const renderLocationSelector = () => {
         </MenuItem>
       );
     }
-    
+
     // 6. Error state (conditional)
     if (locationError) {
       items.push(
@@ -293,7 +293,7 @@ const renderLocationSelector = () => {
         </MenuItem>
       );
     }
-    
+
     return items;
   };
 
@@ -313,22 +313,22 @@ const renderLocationSelector = () => {
           )
         }
         onClick={handleLocationMenuOpen}
-        sx={{ 
-          textTransform: 'none', 
+        sx={{
+          textTransform: 'none',
           color: locationMode ? 'primary.main' : 'text.secondary',
           fontWeight: locationMode ? 500 : 400,
           minWidth: 'auto',
           px: 1
         }}
       >
-        {locationLoading ? 'Detecting...' : 
-         locationMode === 'current' && userCoords 
+        {locationLoading ? 'Detecting...' :
+         locationMode === 'current' && userCoords
           ? `${userCoords.lat.toFixed(2)}°, ${userCoords.lng.toFixed(2)}°`
           : locationMode === 'district' && selectedDistrict
             ? selectedDistrict
             : 'Location'}
       </Button>
-      
+
       {/* ✅ Menu with helper function - NO syntax errors */}
       <Menu
         anchorEl={locationAnchorEl}
@@ -345,7 +345,14 @@ const renderLocationSelector = () => {
 };
 
 return (
-  <Box sx={{ zIndex: 2 }} className="sticky top-0 left-0 right-0 bg-white blur-bg bg-opacity-80">
+  <Box
+  sx={{
+    position: "sticky",
+    top: 0,
+    zIndex: 99999,
+  }}
+  className="bg-white blur-bg bg-opacity-80"
+>
     <div className="flex items-center justify-between px-5 lg:px-20 h-[70px] border-b">
       <div className="flex items-center gap-9">
         <div className="flex items-center gap-2">

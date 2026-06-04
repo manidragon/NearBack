@@ -26,10 +26,16 @@ const Profile = () => {
   const user = useAppSelector(state => state.user);
   const [snackbarOpen, setOpenSnackbar] = useState(false);
 
-  const handleLogout = () => {
-    dispatch(performLogout());
-    navigate("/");
-  };
+ const handleLogout = () => {
+  dispatch(performLogout());
+
+  localStorage.clear();
+  sessionStorage.clear();
+
+  navigate("/", { replace: true });
+
+  window.location.replace("/");
+};
 
   const handleClick = (item: any) => {
     if (item.name === "Logout") {
@@ -42,6 +48,14 @@ const Profile = () => {
   const handleCloseSnackbar = () => {
     setOpenSnackbar(false);
   };
+
+  useEffect(() => {
+  const jwt = localStorage.getItem("jwt");
+
+  if (!jwt) {
+    navigate("/", { replace: true });
+  }
+}, [navigate]);
 
   useEffect(() => {
     if (user.profileUpdated || orders.orderCanceled || user.error) {
@@ -97,10 +111,10 @@ const Profile = () => {
           variant="filled"
           sx={{ width: "100%" }}
         >
-          {user.error 
-            ? user.error 
-            : orders.orderCanceled 
-              ? "Order canceled successfully" 
+          {user.error
+            ? user.error
+            : orders.orderCanceled
+              ? "Order canceled successfully"
               : "Profile updated successfully"}
         </Alert>
       </Snackbar>

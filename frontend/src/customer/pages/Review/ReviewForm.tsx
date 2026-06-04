@@ -133,7 +133,7 @@ const ReviewForm: React.FC = () => {
                     {uploadImage && (
                         <div className="absolute left-0 right-0 top-0 bottom-0 w-24 h-24 flex justify-center items-center">
                             <CircularProgress />
-                        </div>
+                        </div>           
                     )}
                 </label>
 

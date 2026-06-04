@@ -4,48 +4,118 @@ const createError = require("http-errors");
 const ProductService = require("./ProductService");
 
 class ReviewService {
+
+  // ✅ CREATE REVIEW
   async createReview(reqBody, user, productId) {
-    const product= await ProductService.findProductById(productId);
+
+    const product =
+      await ProductService.findProductById(
+        productId
+      );
+
     const review = new Review({
+
       user: user._id,
+
       product: product._id,
+
       rating: reqBody.rating,
+
       reviewText: reqBody.reviewText,
+
+      // ✅ SAVE REVIEW IMAGES
+      productImages:
+        reqBody.productImages || [],
+
     });
-    const savedReview=await review.save();
-    
-    return Review.findById(savedReview._id).populate("user");
+
+    const savedReview =
+      await review.save();
+
+    return Review.findById(
+      savedReview._id
+    ).populate("user");
   }
 
+  // ✅ GET REVIEWS BY PRODUCT
   async getReviewsByProductId(productId) {
-    const reviews = await Review.find({ product: productId }).populate("user");
+
+    const reviews =
+      await Review.find({
+        product: productId,
+      }).populate("user");
+
     return reviews;
   }
 
-  async updateReview(reviewId, reviewText, rating, userId) {
-    const review = await Review.findById(reviewId);
-    if (!review) throw createError.NotFound("Review not found");
+  // ✅ UPDATE REVIEW
+  async updateReview(
+    reviewId,
+    reviewText,
+    rating,
+    userId
+  ) {
 
-    if (review.user.toString() !== userId.toString()) {
-      throw createError.Unauthorized("You are not authorized to update this review");
+    const review =
+      await Review.findById(reviewId);
+
+    if (!review) {
+      throw createError.NotFound(
+        "Review not found"
+      );
+    }
+
+    if (
+      review.user.toString() !==
+      userId.toString()
+    ) {
+      throw createError.Unauthorized(
+        "You are not authorized to update this review"
+      );
     }
 
     review.reviewText = reviewText;
+
     review.rating = rating;
+
     await review.save();
+
     return review;
   }
 
-  async deleteReview(reviewId, userId) {
-    const review = await Review.findById(reviewId);
-    if (!review) throw createError.NotFound("Review not found");
+  // ✅ DELETE REVIEW
+  async deleteReview(
+    reviewId,
+    userId
+  ) {
 
-    if (review.user.toString() !== userId.toString()) {
-      throw createError.Unauthorized("You are not authorized to delete this review");
+    const review =
+      await Review.findById(reviewId);
+
+    if (!review) {
+      throw createError.NotFound(
+        "Review not found"
+      );
+    }
+
+    if (
+      review.user.toString() !==
+      userId.toString()
+    ) {
+      throw createError.Unauthorized(
+        "You are not authorized to delete this review"
+      );
     }
 
     await review.deleteOne();
   }
 }
 
-module.exports = new ReviewService();
+
+
+
+
+
+
+module.exports =
+  new ReviewService();

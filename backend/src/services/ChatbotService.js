@@ -1,56 +1,112 @@
 require("dotenv").config();
-const fs = require("fs");
 const ProductService = require("./ProductService");
 
 class ChatboatService {
-  // The client gets the API key from the environment variable `GEMINI_API_KEY`.
 
   async chatService(contents) {
     const { GoogleGenAI } = await import("@google/genai");
 
-    const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents,
     });
-    console.log(response.text);
+
     return response.text;
   }
 
   async askProductQuestion(productId, userQuestion) {
     try {
+
       const product = await ProductService.findProductById(productId);
 
-      console.log("product ", product);
       if (!product) {
         return "Sorry, the product you're asking about does not exist.";
       }
 
-      const productDetails = JSON.stringify(product);
+      const firstVariant = product.variants?.[0] || {};
+      const firstOffer = firstVariant.offers?.[0] || {};
 
-      console.log("product ", productDetails);
+      const specs =
+        firstVariant.specifications instanceof Map
+          ? Object.fromEntries(firstVariant.specifications)
+          : firstVariant.specifications || {};
+
+      const highlights =
+        product.highlights instanceof Map
+          ? Object.fromEntries(product.highlights)
+          : product.highlights || {};
+
+      const productDetails = `
+Product Name: ${product.title || ""}
+
+Description:
+${product.description || ""}
+
+Color:
+${firstVariant.color || ""}
+
+Selling Price:
+₹${firstOffer.sellingPrice || "Not Available"}
+
+MRP:
+₹${firstOffer.mrpPrice || "Not Available"}
+
+Stock:
+${firstOffer.stock || "Not Available"}
+
+Specifications:
+${JSON.stringify(specs, null, 2)}
+
+Highlights:
+${JSON.stringify(highlights, null, 2)}
+`;
+
+      console.log("====================================");
+      console.log("PRODUCT ID:", productId);
+      console.log("QUESTION:", userQuestion);
+      console.log("PRODUCT DETAILS:", productDetails);
+      console.log("====================================");
 
       const { GoogleGenAI } = await import("@google/genai");
 
-      const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+      });
 
       const prompt = `
-        You are an eCommerce assistant. 
-        Answer the customer's question based only on the product details below.
+You are Near Look AI Shopping Assistant.
 
-        --- PRODUCT DETAILS ---
-        ${productDetails}
-        -----------------------
+Rules:
+1. Answer ONLY using the product information provided.
+2. Never make up specifications, prices, colors, or features.
+3. If information is unavailable, reply:
+   "This information is not available for this product."
+4. Keep answers short and clear.
+5. Mention exact values whenever available.
 
-        Question: ${userQuestion}
-        Answer:
-      `;
+PRODUCT INFORMATION:
+
+${productDetails}
+
+CUSTOMER QUESTION:
+
+${userQuestion}
+
+ANSWER:
+`;
 
       const contents = [
         {
           role: "user",
-          parts: [{ text: prompt }],
+          parts: [
+            {
+              text: prompt,
+            },
+          ],
         },
       ];
 
@@ -59,12 +115,21 @@ class ChatboatService {
         contents,
       });
 
-      const text = response.text;
+      const answer = response.text;
 
-      return text;
+      console.log("====================================");
+      console.log("AI RESPONSE:", answer);
+      console.log("====================================");
+
+      return answer;
+
     } catch (error) {
-      console.error("AI Error:", error);
-      throw Error(error);
+      console.error("====================================");
+      console.error("FULL AI ERROR:");
+      console.error(error);
+      console.error("====================================");
+
+      throw error;
     }
   }
 }

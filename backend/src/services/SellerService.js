@@ -107,37 +107,37 @@ class SellerService {
 
  async updateSeller(existingSeller, sellerData) {
   const updatePayload = { ...sellerData };
-  
+
   // ✅ STRICT: Only update location if coordinates are valid numbers
   const coords = sellerData.location?.coordinates;
-  if (coords && 
-      typeof coords.lat === 'number' && 
+  if (coords &&
+      typeof coords.lat === 'number' &&
       typeof coords.lng === 'number' &&
-      !isNaN(coords.lat) && 
+      !isNaN(coords.lat) &&
       !isNaN(coords.lng)) {
-    
+
     updatePayload.location = {
       type: 'Point',
       coordinates: [coords.lng, coords.lat],
-      address: typeof sellerData.location.address === 'string' 
-        ? sellerData.location.address.trim() 
+      address: typeof sellerData.location.address === 'string'
+        ? sellerData.location.address.trim()
         : existingSeller.location?.address || ''
     };
-  } 
+  }
   // ✅ If location is explicitly set to null/empty, allow clearing it
   else if (sellerData.location === null || sellerData.location === '') {
     updatePayload.location = null;
   }
   // ✅ If location is sent but invalid, IGNORE it (don't update)
-  
+
   // Handle district update
   if (sellerData.district && sellerData.district.trim()) {
     updatePayload.district = sellerData.district.trim();
   }
 
   return await Seller.findByIdAndUpdate(
-    existingSeller._id, 
-    updatePayload, 
+    existingSeller._id,
+    updatePayload,
     {
       new: true,
       runValidators: true
@@ -162,7 +162,7 @@ class SellerService {
   async updateSellerAccountStatus(sellerId, status) {
     const seller = await this.getSellerById(sellerId);
     seller.accountStatus = status;
-    return await seller.save();
+    return await seller.save(); 
   }
 }
 

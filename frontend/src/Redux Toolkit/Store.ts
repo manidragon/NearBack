@@ -17,6 +17,9 @@ import WishlistSlice from "./Customer/WishlistSlice";
 import AiChatBotSlice from "./Customer/AiChatBotSlice";
 import CustomerSlice from "./Customer/Customer/CustomerSlice";
 
+// ✅ NEW: Seller Review Slice
+import SellerReviewSlice from "./Customer/SellerReviewSlice";
+
 // Seller slices
 import sellerSlice from "./Seller/sellerSlice";
 import sellerAuthenticationSlice from "./Seller/sellerAuthenticationSlice";
@@ -32,7 +35,7 @@ import DealSlice from "./Admin/DealSlice";
 import AdminSlice from "./Admin/AdminSlice";
 import categoryReducer from "./Admin/CategorySlice";
 import electronicCategoryReducer from "./Admin/ElectronicCategorySlice";
-import categoryAttributeReducer from "./Admin/CategoryAttributeSlice"; // ✅ ADD THIS
+import categoryAttributeReducer from "./Admin/CategoryAttributeSlice";
 
 const rootReducer = combineReducers({
   // Customer
@@ -41,8 +44,9 @@ const rootReducer = combineReducers({
   products: ProductSlice,
   cart: CartSlice,
   orders: OrderSlice,
-  coupon: CouponSlice, 
+  coupon: CouponSlice,
   review: ReviewSlice,
+  sellerReview: SellerReviewSlice, // ✅ NEW
   wishlist: WishlistSlice,
   aiChatBot: AiChatBotSlice,
   homePage: CustomerSlice,
@@ -58,19 +62,18 @@ const rootReducer = combineReducers({
 
   // Admin
   adminCoupon: AdminCouponSlice,
-  deal: DealSlice, 
+  deal: DealSlice,
   admin: AdminSlice,
   category: categoryReducer,
   electronicCategories: electronicCategoryReducer,
-  categoryAttribute: categoryAttributeReducer, // ✅ ADD THIS LINE
-
+  categoryAttribute: categoryAttributeReducer,
 });
 
 const store = configureStore({
   reducer: rootReducer,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: false, // Disable for non-serializable data (if needed)
+      serializableCheck: false,
     }),
 });
 

@@ -10,6 +10,7 @@ import AddIcon from "@mui/icons-material/Add";
 import WarehouseIcon from "@mui/icons-material/Warehouse";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import ContactMailIcon from "@mui/icons-material/ContactMail";
 
 const menu = [
   {
@@ -28,7 +29,7 @@ const menu = [
     name: "Products",
     path: "/seller/products",
     icon: <InventoryIcon className="text-primary-color" />,
-    activeIcon: <InventoryIcon className="text-white" />, 
+    activeIcon: <InventoryIcon className="text-white" />,
   },
   {
     name: "Stock Management",
@@ -60,6 +61,15 @@ const menu = [
     icon: <ReceiptIcon className="text-primary-color" />,
     activeIcon: <ReceiptIcon className="text-white" />,
   },
+
+  {
+  name: "Enquiry",
+  path: "/seller/enquiry",
+  icon: <ContactMailIcon className="text-primary-color" />,
+  activeIcon: <ContactMailIcon className="text-white" />,
+},
+
+
 ];
 
 const menu2 = [

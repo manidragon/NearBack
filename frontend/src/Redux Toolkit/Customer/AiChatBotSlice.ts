@@ -27,8 +27,8 @@ const initialState: AiChatBotState = {
 // ✅ FIXED: Changed productId from number to string (MongoDB _id is string)
 export const chatBot = createAsyncThunk<
   any,
-  { 
-    prompt: any; 
+  {
+    prompt: any;
     productId: string | null | undefined;  // ✅ Changed from number to string
     userId: string | null  // ✅ Also changed userId to string if it's MongoDB _id
   }
@@ -37,12 +37,12 @@ export const chatBot = createAsyncThunk<
   async ({ prompt, productId, userId }, { rejectWithValue }) => {
     try {
       const jwt = localStorage.getItem("jwt");
-      
+
       // Build params object only with valid values
       const params: Record<string, string> = {};
       if (userId) params.userId = userId;
       if (productId) params.productId = productId;  // ✅ Now string, no conversion needed
-      
+
       const response = await api.post("/chat", prompt, {
         headers: {
           "Content-Type": "application/json",
@@ -57,6 +57,7 @@ export const chatBot = createAsyncThunk<
       return rejectWithValue(
         error.response?.data?.message || "Failed to generate chatbot response"
       );
+      
     }
   }
 );
@@ -75,7 +76,7 @@ export const askProductQuestion = createAsyncThunk<
       );
       console.log("chat answer ----- ", response.data);
       return response.data.answer;
-      
+
     } catch (error: any) {
       console.log("error --- ", error);
       const message =
@@ -110,8 +111,8 @@ const aiChatBotSlice = createSlice({
         state.error = null;
         const { prompt } = action.meta.arg;
 
-        const userPrompt: ChatMessage = { 
-          message: prompt.prompt || prompt, 
+        const userPrompt: ChatMessage = {
+          message: prompt.prompt || prompt,
           role: "user",
           timestamp: new Date()
         };
@@ -122,7 +123,7 @@ const aiChatBotSlice = createSlice({
         // Handle different response formats
         const botResponse = action.payload?.response || action.payload?.message || action.payload;
         state.response = botResponse;
-        
+
         const assistantMsg: ChatMessage = {
           message: botResponse,
           role: "assistant",
@@ -133,7 +134,7 @@ const aiChatBotSlice = createSlice({
       .addCase(chatBot.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
-        
+
         const errorMsg: ChatMessage = {
           message: action.payload as string || "Something went wrong",
           role: "assistant",
@@ -144,7 +145,7 @@ const aiChatBotSlice = createSlice({
       .addCase(askProductQuestion.pending, (state, action) => {
         state.loading = true;
         state.messages.push({
-          role: "user", 
+          role: "user",
           message: action.meta.arg.question,
           timestamp: new Date()
         });
@@ -155,7 +156,7 @@ const aiChatBotSlice = createSlice({
           state.loading = false;
           console.log("ans - ", action.payload);
           state.messages.push({
-            role: "res", 
+            role: "res",
             message: action.payload,
             timestamp: new Date()
           });
