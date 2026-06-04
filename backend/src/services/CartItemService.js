@@ -5,7 +5,7 @@ const CartItemError = require("../exceptions/CartItemErrror");
 const UserError = require("../exceptions/UserError");
 
 class CartItemService {
- async updateCartItem(userId, id, cartItemData) {
+  async updateCartItem(userId, id, cartItemData) {
     const cartItem = await this.findCartItemById(id);
 
     // Verify ownership
@@ -14,7 +14,7 @@ class CartItemService {
     }
 
     const newQuantity = cartItemData.quantity;
-    
+
     // ✅ FIX: Calculate unit prices from existing TOTAL prices
     // cartItem.mrpPrice and cartItem.sellingPrice are TOTALS (unit * old quantity)
     const oldQuantity = cartItem.quantity || 1;
@@ -34,17 +34,17 @@ class CartItemService {
       throw new CartItemError("Invalid price calculation. Please refresh and try again.");
     }
 
-    // Save updated cart item
-    return await CartItem.findByIdAndUpdate(id, updatedFields, {
-      new: true,
-      runValidators: true
-    }).populate({
-      path: "product",
-      populate: [
-        { path: "seller", select: "sellerName businessDetails.businessName" },
-        { path: "category" }
-      ]
-    });
+   return await CartItem.findByIdAndUpdate(id, updatedFields, {
+  new: true,
+  runValidators: true
+}).populate({
+  path: "product",
+  populate: [
+    { path: "seller", select: "sellerName businessDetails.businessName" },
+    { path: "category" }
+  ]
+})
+.populate("sellerId"); 
   }
 
   // Remove a cart item from the user's cart

@@ -1,4 +1,4 @@
-// src/slices/cartSlice.ts
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Customer\CartSlice.ts
 import { createSlice, createAsyncThunk, type PayloadAction } from "@reduxjs/toolkit";
 import { type Cart, type CartItem } from "../../types/cartTypes";
 import { api } from "../../Config/Api";
@@ -69,12 +69,16 @@ interface AddItemRequest {
 export const addItemToCart = createAsyncThunk<
   Cart,
   { jwt: string; request: AddItemRequest }
->("cart/addItemToCart", async ({ jwt, request }, { rejectWithValue }) => {
+>("cart/addItemToCart", async ({ jwt, request }, { rejectWithValue, dispatch }) => {
   try {
     const response = await api.put(`${API_URL}/add`, request, {
       headers: { Authorization: `Bearer ${jwt}` },
     });
-    return response.data;
+    
+    // ✅ RE-FETCH cart to get fully populated data with correct seller info
+    const freshCart = await dispatch(fetchUserCart(jwt)).unwrap();
+    
+    return freshCart;
   } catch (error: any) {
     return rejectWithValue(error.response?.data?.message || "Failed to add item to cart");
   }
@@ -102,7 +106,7 @@ export const updateCartItem = createAsyncThunk<
   { jwt: string; cartItemId: string; cartItem: { quantity: number } }
 >(
   "cart/updateCartItem",
-  async ({ jwt, cartItemId, cartItem }, { rejectWithValue }) => {
+  async ({ jwt, cartItemId, cartItem }, { rejectWithValue, dispatch }) => {
     try {
       const response = await api.put(
         `${API_URL}/item/${cartItemId}`,
@@ -112,9 +116,9 @@ export const updateCartItem = createAsyncThunk<
         }
       );
       
-      // ✅ Handle both response formats:
-      // Format 1: { success: true, updatedCartItem: {...} }
-      // Format 2: Just the CartItem object
+      // ✅ RE-FETCH cart to get fully populated data
+      await dispatch(fetchUserCart(jwt));
+      
       return response.data.updatedCartItem || response.data;
     } catch (error: any) {
       return rejectWithValue(

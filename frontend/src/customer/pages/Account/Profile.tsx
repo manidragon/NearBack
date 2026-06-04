@@ -1,5 +1,5 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Account\Profile.tsx
-import { Alert, Divider, Snackbar } from '@mui/material';
+import { Alert, Divider, Snackbar, Box, Typography } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Order from './Order';
@@ -9,9 +9,11 @@ import OrderDetails from './OrderDetails';
 import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
 import { performLogout } from '../../../Redux Toolkit/Customer/AuthSlice';
 import Addresses from './Adresses';
+import WalletBalance from '../../components/Wallet/WalletBalance';
 
 const menu = [
   { name: "Orders", path: "/account/orders" },
+  { name: "Wallet", path: "/account/wallet" },
   { name: "Profile", path: "/account/profile" },
   { name: "Saved Cards", path: "/account/saved-card" },
   { name: "Addresses", path: "/account/addresses" },
@@ -80,6 +82,17 @@ const Profile = () => {
             <Route path='/profile' element={<UserDetails />} />
             <Route path='/saved-card' element={<SavedCards />} />
             <Route path='/addresses' element={<Addresses />} />
+            <Route
+              path='/wallet'
+              element={
+                <Box sx={{ maxWidth: 600, mx: 'auto' }}>
+                  <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
+                    💳 My Wallet
+                  </Typography>
+                  <WalletBalance compact={false} />
+                </Box>
+              }
+            />
           </Routes>
         </div>
       </div>
@@ -97,10 +110,10 @@ const Profile = () => {
           variant="filled"
           sx={{ width: "100%" }}
         >
-          {user.error 
-            ? user.error 
-            : orders.orderCanceled 
-              ? "Order canceled successfully" 
+          {user.error
+            ? user.error
+            : orders.orderCanceled
+              ? "Order canceled successfully"
               : "Profile updated successfully"}
         </Alert>
       </Snackbar>

@@ -225,13 +225,16 @@ productSchema.index({ categoryName: 1, isActive: 1 });
 productSchema.index({ catalog: 1, isActive: 1 });
 
 // ✅ Virtual: Get all active variants
-productSchema.virtual('activeVariants').get(function () {
-  return this.variants.filter(v => v.isActive);
+productSchema.virtual('activeVariants').get(function() {
+  if (!this.variants || !Array.isArray(this.variants)) return [];  // ✅ Safe fallback
+  return this.variants.filter(v => v.isActive !== false);
 });
 
 // ✅ Virtual: Get unique colors from active variants
-productSchema.virtual('uniqueColors').get(function () {
-  return [...new Set(this.activeVariants.map(v => v.color))];
+productSchema.virtual('uniqueColors').get(function() {
+  if (!Array.isArray(this.variants)) return [];
+  const colors = this.variants.map(v => v.color).filter(Boolean);
+  return [...new Set(colors)];
 });
 
 // ✅ Virtual: Get best price across all offers

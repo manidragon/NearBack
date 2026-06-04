@@ -14,7 +14,7 @@ const PricingCard = () => {
   const PLATFORM_FEE = 7;
   
   // ✅ Calculate total: selling price only (no extra fees)
-  const totalAmount = cart.cart?.totalSellingPrice || 0;
+ const totalAmount = (cart.cart?.totalSellingPrice || 0) + PLATFORM_FEE;
 
   // ✅ Calculate discount for display
   const discount = sumCartItemMrpPrice(cart.cart?.cartItems || []) -

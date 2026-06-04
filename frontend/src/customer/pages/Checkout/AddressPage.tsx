@@ -9,6 +9,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
 import { selectCart } from '../../../Redux Toolkit/Customer/CartSlice';
 import { createOrder } from '../../../Redux Toolkit/Customer/OrderSlice';
@@ -32,18 +33,31 @@ const style = {
     p: 4,
 };
 
-const paymentGatewayList = [
+// ✅ Note: This is now a function that uses walletBalance
+const getPaymentGatewayList = (finalAmount: number, walletBalance: number) => [
     {
         value: "RAZORPAY",
         image: "https://razorpay.com/newsroom-content/uploads/2020/12/output-onlinepngtools-1-1.png",
         label: "Razorpay",
-        icon: null
+        icon: null,
+        disabled: false
     },
     {
         value: "CASH_ON_DELIVERY",
         image: "",
         label: "Cash on Delivery",
-        icon: <CurrencyRupeeIcon />
+        icon: <CurrencyRupeeIcon />,
+        disabled: false
+    },
+    {
+        value: "WALLET",
+        image: "",
+        label: `Pay with Wallet (Balance: ₹${walletBalance})`,
+        icon: <AccountBalanceWalletIcon sx={{ color: walletBalance >= finalAmount ? 'green' : 'red' }} />,
+        disabled: walletBalance < finalAmount,
+        balanceInfo: walletBalance < finalAmount 
+            ? `Insufficient balance (Need ₹${finalAmount - walletBalance} more)` 
+            : null
     }
 ];
 
@@ -65,12 +79,14 @@ const AddressPage = () => {
     const dispatch = useAppDispatch();
     const user = useAppSelector(state => state.user);
     const cart = useAppSelector(selectCart);
-    const [paymentGateway, setPaymentGateway] = useState(paymentGatewayList[0].value);
+    const [paymentGateway, setPaymentGateway] = useState("RAZORPAY"); 
     const [open, setOpen] = useState(false);
     const [snackbarOpen, setSnackbarOpen] = useState(false);
     const [snackbarMessage, setSnackbarMessage] = useState('');
     const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
     const [checkoutLoading, setCheckoutLoading] = useState(false);
+    const [walletBalance, setWalletBalance] = useState<number>(0);
+const [walletLoading, setWalletLoading] = useState<boolean>(false);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -78,6 +94,30 @@ const AddressPage = () => {
             setSelectedAddressId(user.user.addresses[0]._id);
         }
     }, [user.user?.addresses]);
+
+    // ✅ NEW: Fetch wallet balance when component mounts
+useEffect(() => {
+    const fetchWalletBalance = async () => {
+        try {
+            setWalletLoading(true);
+            const jwt = localStorage.getItem('jwt') || '';
+            const response = await axios.get('http://localhost:8080/api/wallet', {
+                headers: { Authorization: `Bearer ${jwt}` }
+            });
+            // ✅ Handle different response structures
+            const balance = response.data.balance || response.data.wallet?.balance || 0;
+            setWalletBalance(balance);
+            console.log('💳 Wallet balance fetched:', balance);
+        } catch (error) {
+            console.error('Failed to fetch wallet balance:', error);
+            setWalletBalance(0);
+        } finally {
+            setWalletLoading(false);
+        }
+    };
+    
+    fetchWalletBalance();
+}, []);
 
     // ✅ NEW: useEffect to trigger Razorpay modal when data is ready
     useEffect(() => {
@@ -131,17 +171,23 @@ const AddressPage = () => {
 
                     console.log("✅ Orders created:", verifyResp.data.orders);
 
-                    // ✅ Clear cart via Redux
-                    dispatch(clearCartAfterOrder());
+                  // ✅ Clear cart via Redux
+dispatch(clearCartAfterOrder());
 
-                    // ✅ Redirect to success page
-                    navigate('/payment-success', {
-                        state: {
-                            paymentId: response.razorpay_payment_id,
-                            orderId: response.razorpay_order_id,
-                            signature: response.razorpay_signature
-                        }
-                    });
+// ✅ FIXED: Redirect with payment_order_id (MongoDB PaymentOrder _id)
+// This ensures PaymentSuccessHandler can reliably find the order
+navigate('/payment-success', {
+    state: {
+        payment_order_id: paymentOrderId,              // ✅ ADD THIS: MongoDB PaymentOrder _id
+        paymentId: response.razorpay_payment_id,       // Razorpay payment ID
+        orderId: response.razorpay_order_id,           // Razorpay order ID
+        signature: response.razorpay_signature
+    }
+});
+
+// ✅ ALSO reset modal state
+setRazorpayOrderData(null);
+setPaymentOrderId(null);
 
                 } catch (err: any) {
                     console.error("❌ Payment verification failed:", err);
@@ -235,27 +281,27 @@ const AddressPage = () => {
         setCheckoutLoading(true);
 
         try {
-             const subtotal = cart.totalSellingPrice;
-  const shippingCost = 0;  // ✅ Changed from: 60
-  const platformFee = 7;
-  const discount = cart.couponPrice || 0;
-  
-  const finalAmount = subtotal + shippingCost + platformFee - discount;
+            const subtotal = cart.totalSellingPrice;
+            const shippingCost = 0;  // ✅ Changed from: 60
+            const platformFee = 7;
+            const discount = cart.couponPrice || 0;
 
-  console.log("💰 Calculated final amount (NO SHIPPING):", finalAmount);
-  console.log("  - Subtotal:", subtotal);
-  console.log("  - Shipping:", shippingCost);  // Will show 0
-  console.log("  - Platform fee:", platformFee);
-  console.log("  - Discount:", discount);
+            const finalAmount = subtotal + shippingCost + platformFee - discount;
 
-  const result: any = await dispatch(createOrder({
-    address: selectedAddress,
-    fulfillmentType,
-    pickupTime: selectedPickupTime ? selectedPickupTime.toISOString() : undefined,
-    jwt: localStorage.getItem('jwt') || "",
-    paymentGateway,
-    finalAmount  // ✅ Send final calculated amount (without shipping)
-  })).unwrap();
+            console.log("💰 Calculated final amount (NO SHIPPING):", finalAmount);
+            console.log("  - Subtotal:", subtotal);
+            console.log("  - Shipping:", shippingCost);  // Will show 0
+            console.log("  - Platform fee:", platformFee);
+            console.log("  - Discount:", discount);
+
+            const result: any = await dispatch(createOrder({
+                address: selectedAddress,
+                fulfillmentType,
+                pickupTime: selectedPickupTime ? selectedPickupTime.toISOString() : undefined,
+                jwt: localStorage.getItem('jwt') || "",
+                paymentGateway,
+                finalAmount
+            })).unwrap();
 
             // ✅ Type Guard 1: Check for Razorpay Order (NEW)
             if (result && result.type === 'RAZORPAY_ORDER' && result.razorpayOrder) {
@@ -275,13 +321,29 @@ const AddressPage = () => {
                 return;
             }
 
-            // ✅ Type Guard 3: Check for COD success
-            if (result && typeof result === 'object' && 'success' in result && result.success && 'orders' in result && result.orders) {
-                // Clear cart via Redux
-                dispatch(clearCartAfterOrder());
-                navigate('/account/orders');
-                return;
-            }
+          // ✅ Type Guard 3: Check for COD or WALLET success
+if (result && typeof result === 'object' && 'success' in result && result.success && 'orders' in result && result.orders) {
+    // Clear cart via Redux
+    dispatch(clearCartAfterOrder());
+    
+    // ✅ Show success message for wallet payment
+    if (result.paymentMethod === 'WALLET') {
+        setSnackbarMessage(`✅ Order placed successfully! ₹${result.totalAmount} deducted from your wallet.`);
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+    }
+    
+    navigate('/account/orders');
+    return;
+}
+
+// ✅ NEW Type Guard 4: Handle insufficient wallet balance
+if (result && typeof result === 'object' && 'success' in result && !result.success && 'currentBalance' in result) {
+    setSnackbarMessage(`❌ ${result.message}`);
+    setSnackbarSeverity('error');
+    setSnackbarOpen(true);
+    return;
+}
 
             // Default fallback
             navigate('/account/orders');
@@ -438,39 +500,65 @@ const AddressPage = () => {
                                 Choose Payment Method
                             </h1>
 
-                            <RadioGroup
-                                aria-labelledby="payment-gateway-group"
-                                name="payment-gateway"
-                                className='flex flex-col gap-3'
-                                onChange={handlePaymentChange}
-                                value={paymentGateway}
-                            >
-                                {paymentGatewayList.map((item) => (
-                                    <FormControlLabel
-                                        key={item.value}
-                                        value={item.value}
-                                        control={<Radio />}
-                                        label={
-                                            <div className='flex items-center gap-3'>
-                                                {item.image ? (
-                                                    <img
-                                                        className='h-8 object-contain'
-                                                        src={item.image}
-                                                        alt={item.label}
-                                                    />
-                                                ) : item.icon ? (
-                                                    <span className='text-primary-color'>{item.icon}</span>
-                                                ) : null}
-                                                <span>{item.label}</span>
-                                            </div>
-                                        }
-                                        className={`border rounded-md p-2 ${paymentGateway === item.value
-                                            ? "border-primary-color bg-primary-color/10"
-                                            : ""
-                                            }`}
+                           {/* ✅ Calculate final amount for wallet validation */}
+{(() => {
+    const subtotal = cart?.totalSellingPrice || 0;
+    const platformFee = 7;
+    const discount = cart?.couponPrice || 0;
+    const finalAmount = subtotal + platformFee - discount;
+    const paymentOptions = getPaymentGatewayList(finalAmount, walletBalance);
+    
+    return (
+        <RadioGroup
+            aria-labelledby="payment-gateway-group"
+            name="payment-gateway"
+            className='flex flex-col gap-3'
+            onChange={handlePaymentChange}
+            value={paymentGateway}
+        >
+            {paymentOptions.map((item) => (
+                <FormControlLabel
+                    key={item.value}
+                    value={item.value}
+                    control={<Radio disabled={item.disabled} />}
+                    disabled={item.disabled}
+                    label={
+                        <div className='flex flex-col'>
+                            <div className='flex items-center gap-3'>
+                                {item.image ? (
+                                    <img
+                                        className='h-8 object-contain'
+                                        src={item.image}
+                                        alt={item.label}
                                     />
-                                ))}
-                            </RadioGroup>
+                                ) : item.icon ? (
+                                    <span className='text-primary-color'>{item.icon}</span>
+                                ) : null}
+                                <span>{item.label}</span>
+                            </div>
+                            {item.balanceInfo && (
+                                <Typography 
+                                    variant="caption" 
+                                    color="error" 
+                                    sx={{ ml: 4, mt: 0.5 }}
+                                >
+                                    ⚠️ {item.balanceInfo}
+                                </Typography>
+                            )}
+                        </div>
+                    }
+                    className={`border rounded-md p-2 ${
+                        item.disabled 
+                            ? "border-gray-300 bg-gray-50 opacity-60" 
+                            : paymentGateway === item.value
+                                ? "border-primary-color bg-primary-color/10"
+                                : ""
+                    }`}
+                />
+            ))}
+        </RadioGroup>
+    );
+})()}
                         </section>
 
                         <section className='border rounded-md'>

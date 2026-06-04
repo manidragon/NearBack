@@ -29,6 +29,16 @@ const orderItemSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: true,
+    },
+     returnRequest: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ReturnRequest',
+        default: null
+    },
+    replacementRequest: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ReturnRequest',
+        default: null
     }
 }, {
     timestamps: true,

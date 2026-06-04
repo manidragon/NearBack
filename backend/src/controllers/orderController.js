@@ -12,10 +12,10 @@ const CartItem = require("../models/CartItem");
 const razorpay = require("../config/razorpayClient");
 
 class OrderController {
- async createOrder(req, res, next) {
-  // ✅ Extract finalAmount from frontend (includes shipping, fees, discount)
-  const { shippingAddress, fulfillmentType = 'DELIVERY', pickupTime, finalAmount } = req.body;
-  const { paymentMethod } = req.query;
+  async createOrder(req, res, next) {
+    // ✅ Extract finalAmount from frontend (includes shipping, fees, discount)
+    const { shippingAddress, fulfillmentType = 'DELIVERY', pickupTime, finalAmount } = req.body;
+    const { paymentMethod } = req.query;
 
     try {
       const user = await req.user;
@@ -53,53 +53,51 @@ class OrderController {
         }
       }
 
-const subtotal = cart.totalSellingPrice;
-const shippingCost = 0; // Your shipping logic
-const platformFee = 7; // Your platform fee logic
-const discount = cart.couponPrice || 0;
+      const subtotal = cart.totalSellingPrice;
+      const shippingCost = 0; // Your shipping logic
+      const platformFee = 7; // Your platform fee logic
+      const discount = cart.couponPrice || 0;
 
-// ✅ Use finalAmount from frontend if provided (trusted after validation), else calculate here
-const totalAmount = finalAmount !== undefined && finalAmount > 0 
-  ? finalAmount 
-  : subtotal + shippingCost + platformFee - discount;
+      // ✅ Use finalAmount from frontend if provided (trusted after validation), else calculate here
+      const totalAmount = finalAmount !== undefined && finalAmount > 0
+        ? finalAmount
+        : subtotal + shippingCost + platformFee - discount;
 
-console.log("💰 Final Amount Calculation:", {
-  subtotal,
-  shipping: shippingCost,
-  platformFee,
-  discount,
-  finalAmountFromFrontend: finalAmount,
-  usedAmount: totalAmount
-});
+      console.log("💰 Final Amount Calculation:", {
+        subtotal,
+        shipping: shippingCost,
+        platformFee,
+        discount,
+        finalAmountFromFrontend: finalAmount,
+        usedAmount: totalAmount
+      });
 
-console.log("Creating order for user:", user._id);
-console.log("Fulfillment type:", fulfillmentType);
-console.log("Payment method:", paymentMethod);
-console.log("Pickup time:", pickupTime);
-  
+      console.log("Creating order for user:", user._id);
+      console.log("Fulfillment type:", fulfillmentType);
+      console.log("Payment method:", paymentMethod);
+      console.log("Pickup time:", pickupTime);
+
 
       // ✅ CASE 1: Cash on Delivery (with or without self-pickup)
       if (paymentMethod === 'CASH_ON_DELIVERY') {
         // Create actual orders immediately — no payment session
         const orders = await OrderService.createOrder(
-          user,
-          addressDoc,           // null if self-pickup
+          req.user,
+          shippingAddress,
           cart,
-          fulfillmentType,      // 👈 Pass fulfillment type
-          pickupTime            // 👈 Pass pickupTime
+          fulfillmentType,
+          pickupTime,
+          req.query.paymentMethod || 'RAZORPAY'
         );
 
         // ✅ FIX: Clear cart items AND cart using cart._id
         try {
           console.log('🔍 Clearing cart with ID:', cart._id);
-
-          // Step 1: Delete all cart item documents from database
           const deletedItems = await CartItem.deleteMany({ cart: cart._id });
           console.log(`🗑️ Deleted ${deletedItems.deletedCount} cart items`);
 
-          // Step 2: Clear the cart document
           const cartClearResult = await Cart.findByIdAndUpdate(
-            cart._id,  // 👈 Use cart ID instead of querying by user
+            cart._id,
             {
               cartItems: [],
               totalSellingPrice: 0,
@@ -113,18 +111,8 @@ console.log("Pickup time:", pickupTime);
           );
 
           console.log('✅ Cart clear result:', cartClearResult);
-
-          if (!cartClearResult) {
-            console.error('❌ Cart clearing FAILED - cart not found');
-          } else {
-            console.log('✅ Cart cleared successfully!');
-            console.log('   Cart ID:', cartClearResult._id);
-            console.log('   Items:', cartClearResult.cartItems.length);
-            console.log('   Total:', cartClearResult.totalSellingPrice);
-          }
         } catch (clearError) {
           console.error('❌ Cart clearing error:', clearError);
-          console.error('❌ Error stack:', clearError.stack);
         }
 
         return res.status(200).json({
@@ -134,15 +122,135 @@ console.log("Pickup time:", pickupTime);
         });
       }
 
-      // ✅ CASE 2: Online Payment (Razorpay/Stripe) → create payment session
-      // Note: Self Pickup with online payment is allowed (e.g., pay online, pick up in store)
+      // ✅✅✅ NEW CASE 2: WALLET PAYMENT
+      if (paymentMethod === 'WALLET') {
+        console.log('💳 Processing wallet payment for user:', user._id);
 
+        // Step 1: Verify wallet balance
+        const WalletService = require('../services/WalletService');
+        const balanceCheck = await WalletService.verifyBalance(user._id, totalAmount);
+
+        if (!balanceCheck.sufficient) {
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient wallet balance. Required: ₹${totalAmount}, Available: ₹${balanceCheck.currentBalance}`,
+            currentBalance: balanceCheck.currentBalance,
+            requiredAmount: totalAmount,
+            deficit: balanceCheck.deficit
+          });
+        }
+
+        // Step 2: Create the order first (to get order IDs)
+        const orders = await OrderService.createOrder(
+          req.user,
+          shippingAddress,
+          cart,
+          fulfillmentType,
+          pickupTime,
+          'WALLET'  // ✅ Pass WALLET as payment method
+        );
+
+      // Step 3: Deduct from wallet using FINAL AMOUNT (includes platform fee)
+try {
+    console.log('💳 Deducting from wallet:', {
+        finalAmount,  // ✅ Use the total amount from frontend
+        ordersCount: orders.length
+    });
+    
+    // ✅ Deduct the FULL amount (including platform fee) from wallet
+    const updatedWallet = await WalletService.debitWallet(
+        user._id,
+        finalAmount,  // ✅ Use finalAmount (65), not order.totalSellingPrice (58)
+        'ORDER_PAYMENT',
+        orders[0]._id,  // Link to first order (or create a combined reference)
+        'Order',
+        `Payment for ${orders.length} order(s) - Total: ₹${finalAmount}`
+    );
+    
+    console.log('💳 Wallet debited successfully:', {
+        amount: finalAmount,
+        newBalance: updatedWallet.balance
+    });
+    
+    // Create transaction records for EACH order
+    for (const order of orders) {
+        try {
+            const TransactionService = require('../services/TransactionService');
+            await TransactionService.createTransaction(order._id, {
+                paymentStatus: 'COMPLETED',
+                paymentMethod: 'WALLET',
+                razorpayPaymentId: null,
+                razorpayOrderId: null
+            });
+            console.log(`✅ WALLET Transaction created for order: ${order._id}`);
+        } catch (txErr) {
+            console.error('⚠️ Failed to create WALLET transaction:', txErr.message);
+        }
+    }
+    
+    console.log('💳 Wallet payment successful:', {
+        totalDeducted: finalAmount,
+        ordersCount: orders.length,
+        finalBalance: updatedWallet.balance
+    });
+    
+} catch (walletError) {
+    console.error('❌ Wallet deduction failed:', walletError);
+    
+    // ❌ CRITICAL: Rollback - Delete created orders if wallet deduction fails
+    for (const order of orders) {
+        await Order.findByIdAndDelete(order._id);
+        console.log('🔄 Rolled back order:', order._id);
+    }
+    
+    return res.status(400).json({
+        success: false,
+        message: walletError.message || 'Wallet payment failed'
+    });
+}
+
+        // Step 4: Clear cart (same as COD)
+        try {
+          console.log('🔍 Clearing cart with ID:', cart._id);
+          const deletedItems = await CartItem.deleteMany({ cart: cart._id });
+          console.log(`🗑️ Deleted ${deletedItems.deletedCount} cart items`);
+
+          await Cart.findByIdAndUpdate(
+            cart._id,
+            {
+              cartItems: [],
+              totalSellingPrice: 0,
+              totalItem: 0,
+              totalMrpPrice: 0,
+              discount: 0,
+              couponCode: null,
+              couponPrice: 0
+            },
+            { new: true }
+          );
+          console.log('✅ Cart cleared after wallet payment');
+        } catch (clearError) {
+          console.error('❌ Cart clearing error:', clearError);
+        }
+
+        // Step 5: Return success response
+        return res.status(200).json({
+          success: true,
+          message: "Order placed successfully using wallet",
+          orders: orders.map(o => o._id),
+          paymentMethod: 'WALLET',
+          totalAmount: totalAmount
+        });
+      }
+
+      // ✅ CASE 3: Online Payment (Razorpay/Stripe) → create payment session
       const paymentOrder = new PaymentOrder({
         user: user._id,
         amount: totalAmount,
-        paymentMethod: "RAZORPAY",  // ✅ Hardcoded string
+        paymentMethod: "RAZORPAY",
         shippingAddress: addressDoc?._id || null,
         pickupTime: pickupTime || null,
+        fulfillmentType: fulfillmentType,
         status: "PENDING"
       });
 

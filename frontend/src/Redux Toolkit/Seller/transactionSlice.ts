@@ -1,6 +1,6 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\Redux Toolkit\Seller\transactionSlice.ts
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import {type Transaction } from '../../types/Transaction';
+import { type Transaction } from '../../types/Transaction';
 import { api } from '../../Config/Api';
 
 interface TransactionState {
@@ -30,10 +30,10 @@ export const fetchTransactionsBySeller = createAsyncThunk<
         Authorization: `Bearer ${jwt}`,
       },
     });
-    console.log("fetchTransactionsBySeller",response.data)
+    console.log("fetchTransactionsBySeller", response.data)
     return response.data;
   } catch (error: any) {
-    console.log("error transaction",error)
+    console.log("error transaction", error)
     if (error.response) {
       return rejectWithValue(error.response.data.message);
     }
@@ -72,7 +72,16 @@ const transactionSlice = createSlice({
       })
       .addCase(fetchTransactionsBySeller.fulfilled, (state, action) => {
         state.loading = false;
-        state.transactions = action.payload;
+
+        // ✅ Type assertion to handle both response formats
+        const payload = action.payload as any;
+
+        // Handle both: Transaction[] OR { transactions: Transaction[], summary: {...} }
+        const transactions = Array.isArray(payload)
+          ? payload
+          : payload?.transactions || [];
+
+        state.transactions = transactions;
       })
       .addCase(fetchTransactionsBySeller.rejected, (state, action) => {
         state.loading = false;

@@ -8,12 +8,12 @@ const PaymentOrderStatus = require('../domain/PaymentOrderStatus');
 const paymentOrderSchema = new mongoose.Schema({
     amount: {
         type: Number,
-        required: true  // Amount is required
+        required: true
     },
     status: {
         type: String,
         enum: Object.values(PaymentOrderStatus),  
-        default: PaymentStatus.PENDING 
+        default: PaymentOrderStatus.PENDING  // ✅ Fixed: was PaymentStatus.PENDING
     },
     paymentMethod: {
         type: String,
@@ -21,17 +21,26 @@ const paymentOrderSchema = new mongoose.Schema({
         default: PaymentMethod.RAZORPAY
     },
     paymentLinkId: {
-        type: String,
-        
+        type: String,  // Stores Razorpay order_id
     },
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',  
         required: true  
     },
- shippingAddress: {
+    shippingAddress: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Address'
+    },
+    // ✅ ADD THESE MISSING FIELDS:
+    fulfillmentType: {
+        type: String,
+        enum: ['DELIVERY', 'SELF_PICKUP'],
+        default: 'DELIVERY'
+    },
+    pickupTime: {
+        type: Date,
+        default: null
     }
 }, {
     timestamps: true  

@@ -27,7 +27,6 @@ export const fetchUserOrderHistory = createAsyncThunk<Order[], string>(
       const response = await api.get<Order[]>(`${API_URL}/user`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
-      console.log("order history fetched ", response.data);
       return response.data;
     } catch (error: any) {
       console.log("error ", error.response);

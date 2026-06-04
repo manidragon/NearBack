@@ -1,16 +1,17 @@
 // D:\Mani\Code with Zosh\Backup\source code\frontend\src\customer\pages\Account\OrderDetails.tsx
-
 import { Box, Button, Divider, CircularProgress, Alert, Typography, Chip } from '@mui/material';
 import { useEffect } from 'react';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import { Replay, AccountBalanceWallet } from '@mui/icons-material'; // ✅ ADD THESE IMPORTS
 import OrderStepper from './OrderStepper';
 import { useAppDispatch, useAppSelector } from '../../../Redux Toolkit/Store';
 import { cancelOrder, fetchOrderById, fetchOrderItemById } from '../../../Redux Toolkit/Customer/OrderSlice';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
+import type { ReturnRequest } from '../../../types/orderTypes'; // ✅ ADD THIS IMPORT
 
 // Helper function to format date and time
 const formatDateTime = (dateString?: string) => {
@@ -45,7 +46,6 @@ const getProductImage = (orderItem: any): string => {
   // Strategy 4: Return placeholder
   return 'image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect width="100" height="100" fill="%23f5f5f5"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="10" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
 };
-
 
 // ✅ Helper: Safely get seller name
 const getSellerName = (orderItem: any): string => {
@@ -87,24 +87,14 @@ const getVariantSpecs = (orderItem: any): { label: string; value: string }[] => 
   }
   
   // 🔍 Strategy 2: Match variant by COLOR (when variantId is missing)
-  // This is the key fix for your issue!
   if (product.variants && orderItem?.size) {
-    const orderColor = orderItem.size.trim(); // e.g., "Black"
+    const orderColor = orderItem.size.trim();
     
-    // Find the variant with matching color
     const matchingVariant = product.variants.find((v: any) => 
       v.color?.toLowerCase() === orderColor.toLowerCase() && v.isActive !== false
     );
     
-    console.log('🔍 Matching variant by color:', {
-      orderColor,
-      foundVariant: !!matchingVariant,
-      variantId: matchingVariant?._id,
-      specs: matchingVariant?.specifications
-    });
-    
     if (matchingVariant?.specifications) {
-      // Extract ALL specifications dynamically
       Object.entries(matchingVariant.specifications).forEach(([key, value]) => {
         if (value === null || value === undefined || value === '') return;
         
@@ -120,24 +110,18 @@ const getVariantSpecs = (orderItem: any): { label: string; value: string }[] => 
         specs.push({ label: formattedLabel, value: stringValue });
       });
       
-      // Add color as the last spec if not already included
       if (matchingVariant.color && !specs.some(s => s.label.toLowerCase() === 'color')) {
         specs.push({ label: 'Color', value: matchingVariant.color });
       }
       
-      if (specs.length > 0) {
-        console.log('✅ Found specs from color match:', specs);
-        return specs;
-      }
+      if (specs.length > 0) return specs;
     }
     
-    // Fallback: Just show the color
     if (matchingVariant?.color) {
       return [{ label: 'Color', value: matchingVariant.color }];
     }
   }
   
-  // Strategy 3: Parse size field as last resort
   if (orderItem?.size && orderItem.size !== 'Default') {
     if (orderItem.size.includes('+')) {
       return orderItem.size.split('+').map((part: string, idx: number) => {
@@ -218,6 +202,30 @@ const OrderDetails = () => {
   const variantSpecs = getVariantSpecs(orders.orderItem);
   const addressToDisplay = orders.currentOrder?.shippingAddress;
 
+  // ✅ Helper: Get return status for this order item
+  const getItemReturnStatus = (): ReturnRequest | null => {
+    // Check if orderItem has returnRequest populated (backend can populate this)
+    return orders.orderItem?.returnRequest || null;
+  };
+
+  // ✅ Helper: Format return status display
+  const getReturnStatusDisplay = (status: string) => {
+    switch (status) {
+      case 'PENDING': return { label: 'Pending Approval', color: '#FFA500' as const };
+      case 'APPROVED': return { label: 'Approved - Awaiting Pickup', color: '#1E90FF' as const };
+      case 'REJECTED': return { label: 'Rejected', color: '#FF0000' as const };
+      case 'PICKED_UP': return { label: 'Picked Up - Processing', color: '#9C27B0' as const };
+      case 'COMPLETED': return { label: 'Refunded to Wallet', color: '#32CD32' as const };
+      case 'CANCELLED': return { label: 'Cancelled', color: '#999' as const };
+      default: return { label: status, color: '#999' as const };
+    }
+  };
+
+  // ✅ Check if any item has pending return (for cancel button logic)
+  const hasPendingReturn = orders.currentOrder?.orderItems?.some(
+    (item: any) => item.returnRequest?.status === 'PENDING'
+  );
+
   return (
     <Box className='space-y-5 px-4 py-6'>
       {/* Product Header */}
@@ -228,7 +236,6 @@ const OrderDetails = () => {
           src={imageUrl} 
           alt={productTitle}
           onError={(e) => {
-            // ✅ Fallback if image fails to load
             (e.target as HTMLImageElement).src = 'image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect width="100" height="100" fill="%23f5f5f5"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="10" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
           }}
         />
@@ -251,6 +258,38 @@ const OrderDetails = () => {
               ))}
             </div>
           )}
+
+          {/* ✅ Return Status Badge - Show if item has a return request */}
+          {(() => {
+            const returnReq = getItemReturnStatus();
+            if (!returnReq) return null;
+            
+            const statusDisplay = getReturnStatusDisplay(returnReq.status);
+            
+            return (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 2, border: '1px dashed', borderColor: statusDisplay.color, maxWidth: 400 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                  <Replay fontSize="small" sx={{ color: statusDisplay.color }} />
+                  <Typography variant="caption" fontWeight="bold" sx={{ color: statusDisplay.color }}>
+                    Return: {statusDisplay.label}
+                  </Typography>
+                </Box>
+                
+                {returnReq.status === 'COMPLETED' && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                    <AccountBalanceWallet fontSize="small" color="success" />
+                    <Typography variant="caption" color="success.main" fontWeight="medium">
+                      ₹{returnReq.refundAmount} credited to wallet
+                    </Typography>
+                  </Box>
+                )}
+                
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Requested: {dayjs(returnReq.createdAt).format('MMM DD, YYYY')}
+                </Typography>
+              </Box>
+            );
+          })()}
         </div>
         
         <div>
@@ -356,14 +395,19 @@ const OrderDetails = () => {
 
         <div className='p-10'>
           <Button
-            disabled={orders.currentOrder?.orderStatus === "CANCELLED"}
+            disabled={orders.currentOrder?.orderStatus === "CANCELLED" || hasPendingReturn}
             onClick={handleCancelOrder}
             color='error' 
             sx={{ py: "0.7rem" }} 
             variant='outlined' 
             fullWidth
           >
-            {orders.currentOrder?.orderStatus === "CANCELLED" ? "Order Canceled" : "Cancel Order"}
+            {hasPendingReturn 
+              ? "Return Request Pending" 
+              : orders.currentOrder?.orderStatus === "CANCELLED" 
+                ? "Order Canceled" 
+                : "Cancel Order"
+            }
           </Button>
         </div>
       </div>

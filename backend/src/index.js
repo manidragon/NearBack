@@ -36,7 +36,13 @@ const categoryRouters = require("./routers/categoryRoutes");
 const electronicCategoryRoutes = require('./routers/electronicCategoryRoutes');
 const categoryAttributeRoutes = require('./routers/categoryAttributeRoutes');
 const catalogRoutes = require('./routers/catalogRoutes');
+const returnRoutes = require('./routers/returnRoutes.js');
+const walletRoutes = require('./routers/walletRoutes.js');
+const webhookRoutes = require('./routers/webhookRoutes.js');
 
+app.use('/api/webhooks', webhookRoutes); 
+app.use('/api/wallet', walletRoutes);
+app.use('/api/returns', returnRoutes); 
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/admin/categories', categoryAttributeRoutes);
 app.use('/api/admin/electronics', electronicCategoryRoutes);

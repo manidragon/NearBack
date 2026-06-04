@@ -18,6 +18,7 @@ import WriteReviews from '../customer/pages/Review/WriteReview'
 import Wishlist from '../customer/pages/Wishlist/Wishlist'
 import { getWishlistByUserId } from '../Redux Toolkit/Customer/WishlistSlice'
 import SearchProducts from '../customer/pages/Search/SearchProducts'
+
 import { useEffect } from 'react'
 
 
@@ -53,7 +54,7 @@ const CustomerRoutes = () => {
         <Route path='/checkout/address' element={<Address />} />
         <Route path='/account/*' element={<Profile />} />
         <Route path='/login' element={<Auth/>} />
-        <Route path='/payment-success/:orderId' element={<PaymentSuccessHandler/>} />
+        <Route path='/payment-success' element={<PaymentSuccessHandler/>} />
         <Route path='*' element={<NotFound />} />
       </Routes>
       <Footer />
