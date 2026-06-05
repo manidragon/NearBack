@@ -11,6 +11,7 @@ import UserSlice from "./Customer/UserSlice";
 import ProductSlice from "./Customer/ProductSlice";
 import CartSlice from "./Customer/CartSlice";
 import OrderSlice from "./Customer/OrderSlice";
+import ReturnSlice from "./Customer/ReturnSlice";
 import CouponSlice from "./Customer/CouponSlice";
 import ReviewSlice from "./Customer/ReviewSlice";
 import WishlistSlice from "./Customer/WishlistSlice";
@@ -28,6 +29,7 @@ import sellerOrderSlice from "./Seller/sellerOrderSlice";
 import payoutSlice from "./Seller/payoutSlice";
 import transactionSlice from "./Seller/transactionSlice";
 import revenueChartSlice from "./Seller/revenueChartSlice";
+import replacementsReducer from "./Seller/ReplacementSlice";
 
 // Admin slices
 import AdminCouponSlice from "./Admin/AdminCouponSlice";
@@ -45,6 +47,8 @@ const rootReducer = combineReducers({
   cart: CartSlice,
   orders: OrderSlice,
   coupon: CouponSlice,
+    returns: ReturnSlice,
+  coupone: CouponSlice,
   review: ReviewSlice,
   sellerReview: SellerReviewSlice, // ✅ NEW
   wishlist: WishlistSlice,
@@ -59,6 +63,7 @@ const rootReducer = combineReducers({
   payouts: payoutSlice,
   transaction: transactionSlice,
   revenueChart: revenueChartSlice,
+  replacements: replacementsReducer,
 
   // Admin
   adminCoupon: AdminCouponSlice,
@@ -67,6 +72,7 @@ const rootReducer = combineReducers({
   category: categoryReducer,
   electronicCategories: electronicCategoryReducer,
   categoryAttribute: categoryAttributeReducer,
+
 });
 
 const store = configureStore({

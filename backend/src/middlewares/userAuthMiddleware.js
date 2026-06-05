@@ -28,7 +28,7 @@ const authMiddleware = async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error("Auth middleware error:", error.message);
+    console.error("Auth middleware error::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::", error.message);
     // 🔑 Don't block on invalid token — treat as guest
     next();
   }

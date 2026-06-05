@@ -6,6 +6,7 @@ const OrderService = require("../services/OrderService");
 const SellerReportService = require("../services/SellerReportService");
 const TransactionService = require("../services/TransactionService");
 const Cart = require("../models/Cart");
+const CartItem = require("../models/CartItem");
 const Address = require("../models/Address");
 
 const paymentSuccessHandler = async (req, res) => {
@@ -37,7 +38,7 @@ const paymentSuccessHandler = async (req, res) => {
 
     // ✅ Find PaymentOrder (supports both MongoDB _id and Razorpay order_id)
     const paymentOrder = await PaymentService.getPaymentOrderByPaymentId(paymentLinkId);
-    
+
     if (!paymentOrder) {
       return res.status(404).json({ message: "Payment order not found" });
     }
@@ -57,10 +58,29 @@ const paymentSuccessHandler = async (req, res) => {
 
     if (paymentSuccess) {
       // ✅ NOW CREATE ACTUAL ORDERS (only after payment success)
-      
+
       // Find cart - handle case where cart might not exist
-      const cart = await Cart.findOne({ user: user._id }).populate('cartItems');
-      
+      const cart = await Cart.findOne({ user: user._id })
+        .populate({
+          path: 'cartItems',
+          populate: [
+            {
+              path: 'product',
+              populate: [
+                { path: 'seller', select: '_id sellerName businessDetails' },  // ✅ Populate seller
+                { path: 'category', select: '_id name' },
+                {
+                  path: 'variants',  // ✅ Also populate variants if needed
+                  populate: {
+                    path: 'offers.seller',
+                    select: '_id sellerName'
+                  }
+                }
+              ]
+            }
+          ]
+        });
+
       if (!cart || !cart.cartItems || cart.cartItems.length === 0) {
         console.log("⚠️ Cart is empty or not found - orders may have been created already");
         // Don't fail - payment was successful, just skip order creation
@@ -81,7 +101,7 @@ const paymentSuccessHandler = async (req, res) => {
         }
       }
       // If shippingAddress is null, that's OK for SELF_PICKUP
-      
+
       console.log("📦 Creating orders with:", {
         userId: user._id,
         cartItems: cart.cartItems.length,
@@ -90,72 +110,122 @@ const paymentSuccessHandler = async (req, res) => {
       });
 
       // ✅ Create actual orders from cart
-      // Pass fulfillmentType and pickupTime if available
-      const orders = await OrderService.createOrder(
-        user, 
-        shippingAddress, 
-        cart,
-        paymentOrder.fulfillmentType || 'DELIVERY',
-        paymentOrder.pickupTime
-      );
-      
-      console.log("✅ Orders created:", orders.map(o => o._id));
-      
+      let orders;
+      try {
+        orders = await OrderService.createOrder(
+          user,
+          shippingAddress,
+          cart,
+          paymentOrder.fulfillmentType || 'DELIVERY',
+          paymentOrder.pickupTime
+        );
+
+        // ✅ Ensure orders is a valid array
+        if (!orders || !Array.isArray(orders)) {
+          console.error("❌ OrderService.createOrder did not return an array:", orders);
+          orders = [];
+        }
+      } catch (orderCreationError) {
+        console.error("❌ Failed to create orders:", orderCreationError.message);
+        return res.status(500).json({
+          message: "Failed to create orders: " + orderCreationError.message,
+          success: false
+        });
+      }
+
+      console.log("✅ Orders created:", orders.map(o => o?._id).filter(id => id));
+
       // Process each newly created order
-      for (let order of orders) {
+      for (const order of orders) {
+        // ✅ Skip invalid orders
+        if (!order || !order._id) {
+          console.warn("⚠️ Skipping invalid order:", order);
+          continue;
+        }
+
         try {
-          // Create transaction
-          await TransactionService.createTransaction(order._id);
+          // ✅ Create transaction with payment details
+          await TransactionService.createTransaction(order._id, {
+            paymentStatus: 'COMPLETED',
+            paymentMethod: 'RAZORPAY',
+            razorpayPaymentId: paymentId,
+            razorpayOrderId: paymentLinkId
+          });
 
-          // Update seller report
-          try {
-            const seller = await SellerService.getSellerById(order.seller);
-            if (seller) {
-              let sellerReport = await SellerReportService.getSellerReport(seller._id);
-              
-              sellerReport.totalOrders += 1;
-              sellerReport.totalEarnings += order.totalSellingPrice;
-              sellerReport.totalSales += order.orderItems.length;
+          // ✅ Null safety for seller - use order.seller or fallback to paymentOrder
+          const sellerId = order.seller?._id || order.seller || paymentOrder.user;
 
-              await SellerReportService.updateSellerReport(sellerReport);
-              console.log("✅ Updated seller report:", sellerReport._id);
-            }
-          } catch (reportError) {
-            console.error(`⚠️ Failed to update seller report:`, reportError.message);
-            // Don't fail the whole flow for report update error
+          if (!sellerId) {
+            console.warn("⚠️ No seller found for order:", order._id, "- skipping report update");
+          } else {
+            // ✅ Increment seller report atomically
+            await SellerReportService.incrementSellerReport(sellerId, {
+              orderAmount: order.totalSellingPrice,
+              platformFee: 7,
+              orderStatus: order.orderStatus,
+              isCancelled: false
+            });
           }
+
+          console.log("✅ Transaction & report updated for order:", order._id);
+
         } catch (orderProcessingError) {
-          console.error(`⚠️ Failed to process order ${order._id}:`, orderProcessingError.message);
+          console.error(`⚠️ Failed to process order ${order._id}:`, {
+            message: orderProcessingError.message,
+            stack: orderProcessingError.stack
+          });
           // Don't fail the whole flow for individual order error
         }
       }
 
       // ✅ Clear user's cart - use cart._id directly
       try {
-        await CartItem.deleteMany({ cart: cart._id });
-        await Cart.findByIdAndUpdate(
+        console.log("🗑️ Clearing cart for user:", user._id, "cartId:", cart._id);
+
+        // Step 1: Delete all cart item documents
+        const deleteResult = await CartItem.deleteMany({ cart: cart._id });
+        console.log(`✅ Deleted ${deleteResult.deletedCount} cart items from database`);
+
+        // Step 2: Reset cart document fields
+        const updatedCart = await Cart.findByIdAndUpdate(
           cart._id,
-          { 
-            cartItems: [], 
-            totalSellingPrice: 0, 
-            totalItem: 0, 
+          {
+            cartItems: [],
+            totalSellingPrice: 0,
+            totalItem: 0,
             totalMrpPrice: 0,
             discount: 0,
             couponCode: null,
             couponPrice: 0
           },
-          { new: true }
+          { new: true, runValidators: true }
         );
-        console.log("✅ Cart cleared for user:", user._id);
+
+        // Step 3: Verify cart was cleared
+        if (updatedCart) {
+          console.log("✅ Cart reset successfully:", {
+            cartId: updatedCart._id,
+            itemsCount: updatedCart.cartItems?.length || 0,
+            total: updatedCart.totalSellingPrice
+          });
+        } else {
+          console.warn("⚠️ Cart document not found after update");
+        }
+
       } catch (clearError) {
-        console.error("⚠️ Failed to clear cart:", clearError.message);
-        // Don't fail the whole flow for cart clearing error
+        console.error("⚠️ Failed to clear cart (non-fatal - payment succeeded):", {
+          message: clearError.message,
+          stack: clearError.stack,
+          cartId: cart._id,
+          userId: user._id
+        });
       }
 
       return res.status(200).json({
         message: "Payment processed successfully",
         success: true,
-        orders: orders.map(o => o._id),
+        // ✅ Filter out null/undefined order IDs
+        orders: orders.map(o => o?._id).filter(id => id),
         paymentId
       });
     } else {
@@ -172,7 +242,7 @@ const paymentSuccessHandler = async (req, res) => {
       paymentId,
       paymentLinkId
     });
-    
+
     return res.status(500).json({
       message: "Internal server error during payment processing: " + err.message,
       success: false,

@@ -1,16 +1,22 @@
-// src/seller/components/drawer/SellerDrawerList.tsx
+// D:\Mani\Code with Zosh\Backup\source code\frontend\src\seller\components\SideBar\DrawerList.tsx
+
 import DrawerList from "../../../admin seller/components/drawerList/DrawerList";
-import { AccountBox } from "@mui/icons-material";
+
+import {
+  AccountBox,
+  Replay,
+  SwapHoriz,
+} from "@mui/icons-material";
+
 import LogoutIcon from "@mui/icons-material/Logout";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import ReceiptIcon from "@mui/icons-material/Receipt";
 import ShoppingBagIcon from "@mui/icons-material/ShoppingBag";
 import InventoryIcon from "@mui/icons-material/Inventory";
 import AddIcon from "@mui/icons-material/Add";
-import WarehouseIcon from "@mui/icons-material/Warehouse";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import WarehouseIcon from "@mui/icons-material/Warehouse";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
-import ContactMailIcon from "@mui/icons-material/ContactMail";
 
 const menu = [
   {
@@ -24,6 +30,18 @@ const menu = [
     path: "/seller/orders",
     icon: <ShoppingBagIcon className="text-primary-color" />,
     activeIcon: <ShoppingBagIcon className="text-white" />,
+  },
+  {
+    name: "Returns",
+    path: "/seller/returns",
+    icon: <Replay className="text-primary-color" />,
+    activeIcon: <Replay className="text-white" />,
+  },
+  {
+    name: "Replacements",
+    path: "/seller/replacements",
+    icon: <SwapHoriz className="text-primary-color" />,
+    activeIcon: <SwapHoriz className="text-white" />,
   },
   {
     name: "Products",
@@ -61,15 +79,6 @@ const menu = [
     icon: <ReceiptIcon className="text-primary-color" />,
     activeIcon: <ReceiptIcon className="text-white" />,
   },
-
-  {
-  name: "Enquiry",
-  path: "/seller/enquiry",
-  icon: <ContactMailIcon className="text-primary-color" />,
-  activeIcon: <ContactMailIcon className="text-white" />,
-},
-
-
 ];
 
 const menu2 = [
@@ -92,7 +101,13 @@ interface DrawerListProps {
 }
 
 const SellerDrawerList = ({ toggleDrawer }: DrawerListProps) => {
-  return <DrawerList menu={menu} menu2={menu2} toggleDrawer={toggleDrawer} />;
+  return (
+    <DrawerList
+      menu={menu}
+      menu2={menu2}
+      toggleDrawer={toggleDrawer}
+    />
+  );
 };
 
 export default SellerDrawerList;

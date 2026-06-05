@@ -15,7 +15,7 @@ class JwtProvider {
 
     // Method to create JWT
     createJwt(payload) {
-        return jwt.sign(payload, this.secretKey, { expiresIn: '24h' }); 
+        return jwt.sign(payload, this.secretKey, { expiresIn: '48h' }); 
     }
 
     getEmailFromJwt(token) {

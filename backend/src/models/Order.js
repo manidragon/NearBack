@@ -5,27 +5,26 @@ const PaymentStatus = require('../domain/PaymentStatus');
 const { Schema } = mongoose;
 
 const orderSchema = new Schema({
-    
     user: {
         type: Schema.Types.ObjectId,
-        ref: 'User', 
+        ref: 'User',
         required: true,
     },
     seller: {
         type: Schema.Types.ObjectId,
-        ref: 'Seller', // Reference to the Seller model
+        ref: 'Seller',
         required: true,
     },
     orderItems: [{
         type: Schema.Types.ObjectId,
-        ref: 'OrderItem', 
+        ref: 'OrderItem',
     }],
     shippingAddress: {
         type: Schema.Types.ObjectId,
-        ref: 'Address', 
+        ref: 'Address',
         required: true,
     },
-    
+
     totalMrpPrice: {
         type: Number,
         required: true,
@@ -40,10 +39,10 @@ const orderSchema = new Schema({
     },
     orderStatus: {
         type: String,
-        enum: Object.values(OrderStatus), 
+        enum: Object.values(OrderStatus),
         default: OrderStatus.PLACED,
     },
-     fulfillmentType: {
+    fulfillmentType: {
         type: String,
         enum: ['DELIVERY', 'SELF_PICKUP'],
         default: 'DELIVERY'
@@ -51,6 +50,11 @@ const orderSchema = new Schema({
     totalItem: {
         type: Number,
         required: true,
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['RAZORPAY', 'CASH_ON_DELIVERY', 'WALLET'], // ✅ Added 'WALLET' just in case
+        default: 'RAZORPAY'
     },
     paymentStatus: {
         type: String,
@@ -67,13 +71,48 @@ const orderSchema = new Schema({
     },
     deliverDate: {
         type: Date,
-        default: function() {
-            return Date.now() + 7 * 24 * 60 * 60 * 1000; 
+        default: function () {
+            return Date.now() + 7 * 24 * 60 * 60 * 1000;
         },
     },
+    
+    // ============================================================================
+    // ✅ REPLACEMENT FIELDS (Phase 3) - CLEANED & OPTIMIZED
+    // ============================================================================
+    replacementFor: {
+        type: Schema.Types.ObjectId,
+        ref: 'OrderItem',
+        sparse: true,  // Only populated if this order is a replacement
+        index: true    // ✅ Fast lookup for "find all replacement orders for an item"
+    },
+    replacementStatus: {
+        type: String,
+        // ✅ UPDATED: Matches ReturnRequest workflow to prevent validation errors
+        enum: [
+            'NONE', 
+            'PENDING', 
+            'APPROVED', 
+            'ORIGINAL_RETURNED', 
+            'REVIEW_COMPLETED', 
+            'REPLACEMENT_SHIPPED', 
+            'COMPLETED', 
+            'CANCELLED'
+        ],
+        default: 'NONE',
+        index: true
+    },
+    priceDifference: {
+        type: Number,
+        default: 0
+    }
+    // ❌ REMOVED: originalOrderItem (redundant with replacementFor)
+
 }, {
-    timestamps: true, 
+    timestamps: true,
 });
+
+// ✅ Compound index for replacement order queries
+orderSchema.index({ replacementFor: 1, replacementStatus: 1 });
 
 const Order = mongoose.model('Order', orderSchema);
 module.exports = Order;

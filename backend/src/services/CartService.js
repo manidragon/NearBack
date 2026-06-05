@@ -5,54 +5,73 @@ const User = require("../models/User");
 const Cart = require("../models/Cart");
 
 class CartService {
-async findUserCart(user) {
-  // ✅ FIX: Deep population for variants and offers.seller
-  let cart = await Cart.findOne({ user: user._id })
-    .populate({
-      path: "cartItems",
-      populate: {
-        path: "product",
-        populate: [
-          { 
-            path: "seller", 
-            select: "sellerName businessDetails.businessName businessDetails.logo"
-          },
-          { 
-            path: "variants",  // ✅ Populate variants array
-            populate: {
-              path: "offers.seller",  // ✅ CRITICAL: Populate seller within offers
-              select: "sellerName businessDetails.businessName"
+  async findUserCart(user) {
+    
+    let cart = await Cart.findOne({ user: user._id });
+
+    if (!cart) {
+      const newCart = new Cart({ user: user._id, cartItems: [] });
+      cart = await newCart.save();
+      return cart;
+    }
+
+    try {
+      cart = await Cart.findOne({ user: user._id })
+        .populate({
+          path: "cartItems",
+          populate: [
+            {
+              path: "product",
+              populate: [
+                {
+                  path: "seller",
+                  select: "sellerName businessDetails.businessName businessDetails.logo"
+                },
+                {
+                  path: "variants",
+                  populate: {
+                    path: "offers.seller",
+                    select: "sellerName businessDetails.businessName"
+                  }
+                },
+                { path: "category" }
+              ]
+            },
+            {
+              path: "sellerId",
+              select: "sellerName businessDetails.businessName district"
             }
-          },
-          { path: "category" }
-        ]
+          ]
+        });
+    } catch (populateError) {
+      console.error('❌ [STEP 3] Population failed:', populateError);
+    }
+
+    cart.cartItems = cart.cartItems.map(item => {
+      if (item.sellerId && typeof item.sellerId === 'object') {
+        item.sellerName = item.sellerId.businessDetails?.businessName ||
+          item.sellerId.sellerName;
       }
+      return item;
     });
 
-  if (!cart) {
-    const newCart = new Cart({ user: user._id, cartItems: [] });
-    cart = await newCart.save();
+    let totalPrice = 0;
+    let totalDiscountedPrice = 0;
+    let totalItem = 0;
+
+    cart.cartItems.forEach((cartItem, index) => {
+      totalPrice += cartItem.mrpPrice || 0;
+      totalDiscountedPrice += cartItem.sellingPrice || 0;
+      totalItem += cartItem.quantity || 0;
+    });
+
+    cart.totalMrpPrice = totalPrice;
+    cart.totalSellingPrice = totalDiscountedPrice - (cart.couponPrice || 0);
+    cart.totalItem = totalItem;
+    cart.discount = this.calculateDiscountPercentage(totalPrice, totalDiscountedPrice);
+
     return cart;
   }
-
-  // Calculate totals
-  let totalPrice = 0;
-  let totalDiscountedPrice = 0;
-  let totalItem = 0;
-
-  cart.cartItems.forEach((cartItem) => {
-    totalPrice += cartItem.mrpPrice || 0;
-    totalDiscountedPrice += cartItem.sellingPrice || 0;
-    totalItem += cartItem.quantity || 0;
-  });
-
-  cart.totalMrpPrice = totalPrice;
-  cart.totalSellingPrice = totalDiscountedPrice - (cart.couponPrice || 0);
-  cart.totalItem = totalItem;
-  cart.discount = this.calculateDiscountPercentage(totalPrice, totalDiscountedPrice);
-
-  return cart;
-}
 
   calculateDiscountPercentage(mrpPrice, sellingPrice) {
     if (mrpPrice <= 0) {
@@ -63,15 +82,15 @@ async findUserCart(user) {
     return Math.round(discountPercentage);
   }
 
-    async addCartItem(
-    user, 
-    productId, 
-    variantId, 
-    offerId, 
-    sellerId, 
-    size, 
-    quantity, 
-    unitMrpPrice, 
+  async addCartItem(
+    user,
+    productId,
+    variantId,
+    offerId,
+    sellerId,
+    size,
+    quantity,
+    unitMrpPrice,
     unitSellingPrice
   ) {
     const cart = await this.findUserCart(user);
@@ -117,7 +136,7 @@ async findUserCart(user) {
     existingItem.quantity += quantity;
     existingItem.mrpPrice = unitMrpPrice * existingItem.quantity;
     existingItem.sellingPrice = unitSellingPrice * existingItem.quantity;
-    
+
     await existingItem.save();
     return existingItem;
   }

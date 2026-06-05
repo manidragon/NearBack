@@ -40,9 +40,10 @@ const Cart = () => {
   useEffect(() => {
     const jwt = localStorage.getItem("jwt");
     if (jwt) {
+      // ✅ Force fresh fetch on mount and when auth changes
       dispatch(fetchUserCart(jwt));
     }
-  }, [auth.jwt, dispatch]);
+  }, [dispatch]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCouponCode(e.target.value);
@@ -79,13 +80,6 @@ const Cart = () => {
 
   // ✅ FIX 3: Safe cart items fallback
   const cartItems = cart?.cart?.cartItems || [];
-  
-  console.log('🔍 Cart items debug:', cartItems.map(item => ({
-  _id: item._id,
-  title: item.product?.title,
-  hasId: !!item._id,
-  type: typeof item._id
-})));
 
   return (
     <>
@@ -95,16 +89,16 @@ const Cart = () => {
 
             {/* Cart Items */}
             <div className="lg:col-span-2 space-y-3">
-            {/* ✅ FIX: Use fallback key if _id is missing */}
-            {cartItems.map((item: CartItem, index: number) => {
-              // ✅ Generate unique key: prefer _id, fallback to index + productId
-              const uniqueKey = item._id 
-                ? String(item._id) 
-                : `cart-item-${index}-${item.product?._id || 'unknown'}`;
-              
-              return <CartItemCard key={uniqueKey} item={item} />;
-            })}
-          </div>
+              {/* ✅ FIX: Use fallback key if _id is missing */}
+             {cartItems.map((item: CartItem, index: number) => {
+  // ✅ Generate unique key with updatedAt to force re-render on quantity changes
+  const uniqueKey = item._id 
+    ? `${String(item._id)}-${item.updatedAt || index}`
+    : `cart-item-${index}-${item.product?._id || 'unknown'}`;
+  
+  return <CartItemCard key={uniqueKey} item={item} />;
+})}
+            </div>
 
             {/* Right Section */}
             <div className="col-span-1 text-sm space-y-3">

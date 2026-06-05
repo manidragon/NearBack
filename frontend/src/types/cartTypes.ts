@@ -45,6 +45,7 @@ export interface CartItem {
   userId: string;
   createdAt: string;
   updatedAt: string;
+  sellerName?: string; 
 }
 
 
