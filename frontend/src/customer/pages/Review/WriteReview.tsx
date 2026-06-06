@@ -56,9 +56,7 @@ const WriteReview = () => {
 
     onSubmit: async (values) => {
       if (!productId) return;
-
       try {
-        // ✅ Dispatch createReview — navigate(-1) is called inside the thunk
         await dispatch(
           createReview({
             productId,
@@ -73,23 +71,28 @@ const WriteReview = () => {
     },
   });
 
-  const handleImageChange = async (event: any) => {
-    const file = event.target.files[0];
+  // ✅ FIX: uploadToCloudinary returns { success, url } — extract url correctly
+  const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     try {
       setUploadingImage(true);
-      const image = await uploadToCloudinary(file);
-      if (!image) return;
+      const result = await uploadToCloudinary(file);
 
-      formik.setFieldValue("productImages", [
-        ...formik.values.productImages,
-        image,
-      ]);
+      if (result.success && result.url) {
+        formik.setFieldValue("productImages", [
+          ...formik.values.productImages,
+          result.url, // ✅ use result.url, not the whole result object
+        ]);
+      } else {
+        console.error("Image upload failed:", result.error);
+      }
     } catch (error) {
-      console.log(error);
+      console.error("Upload error:", error);
     } finally {
       setUploadingImage(false);
+      event.target.value = ""; // ✅ reset input so same file can be re-uploaded
     }
   };
 
@@ -121,7 +124,6 @@ const WriteReview = () => {
             <Divider sx={{ width: "100%", my: 3 }} />
 
             <div className="space-y-4 w-full text-left">
-              {/* RATE PRODUCT */}
               <div className="flex gap-3 items-start">
                 <StarIcon className="text-yellow-500 mt-1" />
                 <div>
@@ -132,7 +134,6 @@ const WriteReview = () => {
                 </div>
               </div>
 
-              {/* UPLOAD PHOTO */}
               <div className="flex gap-3 items-start">
                 <AddPhotoAlternateIcon className="text-blue-500 mt-1" />
                 <div>
@@ -173,7 +174,7 @@ const WriteReview = () => {
                 precision={1}
                 size="large"
                 value={formik.values.rating}
-                onChange={(event, value) =>
+                onChange={(_event, value) =>
                   formik.setFieldValue("rating", value)
                 }
               />
@@ -212,7 +213,6 @@ const WriteReview = () => {
               </Typography>
 
               <div className="flex flex-wrap gap-4">
-                {/* UPLOAD BUTTON */}
                 <input
                   type="file"
                   id="review-image"
@@ -221,27 +221,31 @@ const WriteReview = () => {
                   onChange={handleImageChange}
                 />
 
-                <label htmlFor="review-image">
-                  <div className="w-28 h-28 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-50 transition relative">
+                <label htmlFor="review-image" className="relative">
+                  <div className="w-28 h-28 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-50 transition">
                     <AddPhotoAlternateIcon
                       className="text-gray-500"
                       sx={{ fontSize: 35 }}
                     />
-                    {uploadImage && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-white/70 rounded-xl">
-                        <CircularProgress size={28} />
-                      </div>
-                    )}
                   </div>
+                  {/* ✅ spinner overlay on the label, not inside the div */}
+                  {uploadImage && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/70 rounded-xl">
+                      <CircularProgress size={28} />
+                    </div>
+                  )}
                 </label>
 
-                {/* UPLOADED IMAGES */}
+                {/* ✅ images are now proper string URLs — will render correctly */}
                 {formik.values.productImages.map((image, index) => (
                   <div key={index} className="relative">
                     <img
                       src={image}
-                      alt="review"
+                      alt={`review-${index}`}
                       className="w-28 h-28 rounded-xl object-cover border"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
                     />
                     <IconButton
                       size="small"
@@ -264,7 +268,6 @@ const WriteReview = () => {
 
             {/* BUTTONS */}
             <div className="flex gap-3 pt-2">
-              {/* CANCEL */}
               <Button
                 variant="outlined"
                 color="inherit"
@@ -273,7 +276,6 @@ const WriteReview = () => {
                 Cancel
               </Button>
 
-              {/* SUBMIT */}
               <Button
                 type="submit"
                 variant="contained"

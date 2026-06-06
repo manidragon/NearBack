@@ -21,7 +21,7 @@ export default function Contact({ seller }: any) {
     setIsSubmitting(true);
 
     fetch(
-      'http://localhost:8080/api/enquiry/create', {
+  'http://localhost:8080/api/enquiries/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

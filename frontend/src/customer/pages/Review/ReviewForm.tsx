@@ -28,7 +28,7 @@ const ReviewForm: React.FC = () => {
     const [uploadImage, setUploadingImage] = useState(false);
     const dispatch = useAppDispatch()
     const { productId } = useParams();
-    const navigate=useNavigate();
+    const navigate = useNavigate();
 
     const formik = useFormik<CreateReviewRequest>({
         initialValues: {
@@ -61,17 +61,42 @@ const ReviewForm: React.FC = () => {
     });
 
     const handleImageChange = async (event: any) => {
-        const file = event.target.files[0];
+        const file = event.target.files?.[0];
+
+        if (!file) return;
+
         setUploadingImage(true);
-        const image = await uploadToCloudinary(file);
-        // const image = URL.createObjectURL(file);
-        formik.setFieldValue("productImages", [...formik.values.productImages, image]);
-        setUploadingImage(false);
+
+        try {
+            const result = await uploadToCloudinary(file);
+
+            if (result.success && result.url) {
+                formik.setFieldValue(
+                    "productImages",
+                    [
+                        ...formik.values.productImages,
+                        result.url
+                    ]
+                );
+            } else {
+                alert(result.error || "Image upload failed");
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Image upload failed");
+        } finally {
+            setUploadingImage(false);
+        }
     };
+
     const handleRemoveImage = (index: number) => {
         const updatedImages = [...formik.values.productImages];
         updatedImages.splice(index, 1);
-        formik.setFieldValue("images", updatedImages);
+
+        formik.setFieldValue(
+            "productImages",
+            updatedImages
+        );
     };
     return (
         <Box
@@ -133,7 +158,7 @@ const ReviewForm: React.FC = () => {
                     {uploadImage && (
                         <div className="absolute left-0 right-0 top-0 bottom-0 w-24 h-24 flex justify-center items-center">
                             <CircularProgress />
-                        </div>           
+                        </div>
                     )}
                 </label>
 

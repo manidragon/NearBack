@@ -1,6 +1,9 @@
+// src/customer/pages/SellerProfile/SellerProfile.tsx
 import "./seller.css";
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { api } from "../../../Config/Api";
+import { CircularProgress, Alert, Box } from "@mui/material";
 
 import Header from "./Header";
 import Products from "./Products";
@@ -10,163 +13,90 @@ import Policies from "./Policies";
 import Contact from "./Contact";
 
 export default function SellerProfile() {
-
-  const { sellerId } =
-    useParams();
-
-  const [seller, setSeller] =
-    useState<any>(null);
-
-  const [loading, setLoading] =
-    useState(true);
-
-
-  // default show ALL sections
-  // default show Products section
-  const [activeTab,
-    setActiveTab] =
-    useState("products");
-
+  const { sellerId } = useParams<{ sellerId: string }>();
+  const [seller, setSeller] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("products");
 
   useEffect(() => {
-
     if (!sellerId) {
-
       setLoading(false);
-
+      setError("Seller ID not found");
       return;
-
     }
 
-    fetch(
-      `http://localhost:8080/sellers/${sellerId}`
-    )
+    setLoading(true);
+    setError(null);
 
-      .then(res => res.json())
-
-      .then(data => {
-
-        setSeller(data);
-
+    // ✅ FIX: Use configured `api` instance instead of raw fetch
+    // This ensures auth headers, base URL, and interceptors are applied
+    api
+      .get(`/sellers/${sellerId}`)
+      .then((res) => {
+        setSeller(res.data);
       })
-
-      .catch(err => {
-
-        console.log(err);
-
+      .catch((err) => {
+        console.error("Failed to fetch seller:", err);
+        setError(
+          err.response?.data?.message || "Failed to load seller profile"
+        );
       })
-
       .finally(() => {
-
         setLoading(false);
-
       });
-
   }, [sellerId]);
 
-
   if (loading) {
-
     return (
-
-      <div>
-
-        Loading...
-
-      </div>
-
-    )
-
+      <Box
+        sx={{
+          height: "60vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
   }
 
-
-  if (!seller) {
-
+  if (error || !seller) {
     return (
-
-      <div>
-
-        Seller not found
-
-      </div>
-
-    )
-
+      <Box sx={{ maxWidth: 400, mx: "auto", mt: 8, px: 2 }}>
+        <Alert severity="error">{error || "Seller not found"}</Alert>
+      </Box>
+    );
   }
-
 
   return (
-
     <div className="seller-page">
-
-
       <Header
-
         seller={seller}
-
         activeTab={activeTab}
-
         setActiveTab={setActiveTab}
-
       />
 
-
-      {(activeTab === "all" ||
-
-        activeTab === "products")
-
-        &&
-
+      {(activeTab === "all" || activeTab === "products") && (
         <Products seller={seller} />
-      }
+      )}
 
-
-
-      {(activeTab === "all" ||
-
-        activeTab === "about")
-
-        &&
-
+      {(activeTab === "all" || activeTab === "about") && (
         <About seller={seller} />
-      }
+      )}
 
-
-
-      {(activeTab === "all" ||
-
-        activeTab === "reviews")
-
-        &&
-
+      {(activeTab === "all" || activeTab === "reviews") && (
         <Reviews seller={seller} />
-      }
+      )}
 
-
-
-      {(activeTab === "all" ||
-
-        activeTab === "policies")
-
-        &&
-
+      {(activeTab === "all" || activeTab === "policies") && (
         <Policies seller={seller} />
-      }
+      )}
 
-
-
-      {(activeTab === "all" ||
-
-        activeTab === "contact")
-
-        &&
-
+      {(activeTab === "all" || activeTab === "contact") && (
         <Contact seller={seller} />
-      }
-
-
+      )}
     </div>
-
-  )
-
+  );
 }

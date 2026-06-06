@@ -44,6 +44,8 @@ export const fetchSellerReviews = createAsyncThunk<
   async ({ sellerId }, { rejectWithValue }) => {
     try {
       const response = await api.get(`/api/seller-review/${sellerId}`);
+
+      console.log("Seller Reviews API:", response.data);
       return { sellerId, reviews: response.data };
     } catch (error: any) {
       return rejectWithValue(

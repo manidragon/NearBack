@@ -70,22 +70,38 @@ const SellerReviewForm = () => {
     },
   });
 
-  const handleImageChange = async (event: any) => {
-    const file = event.target.files[0];
-    if (!file) return;
+ const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  try {
     setUploadingImage(true);
-    const image = await uploadToCloudinary(file);
-    if (image) {
-      formik.setFieldValue("images", [...formik.values.images, image]);
+    const result = await uploadToCloudinary(file);
+
+    if (result.success && result.url) {
+      formik.setFieldValue("images", [
+        ...formik.values.images,
+        result.url,  // ✅ extract .url, not the whole result object
+      ]);
+    } else {
+      console.error("Image upload failed:", result.error);
     }
+  } catch (error) {
+    console.error("Upload error:", error);
+  } finally {
     setUploadingImage(false);
-  };
+    event.target.value = ""; // ✅ reset so same file can be re-selected
+  }
+};
 
   const handleRemoveImage = (index: number) => {
     const updated = [...formik.values.images];
     updated.splice(index, 1);
     formik.setFieldValue("images", updated);
   };
+
+  console.log("formik images", formik.values.images);
+
 
   return (
     <div className="min-h-screen bg-[#f1f3f6] py-6">
@@ -212,7 +228,13 @@ const SellerReviewForm = () => {
 
                     {formik.values.images.map((image, index) => (
                       <div key={index} className="relative">
-                        <img src={image} alt="" className="w-24 h-24 rounded-md object-cover border" />
+                        <img
+                          src={String(image)}
+                          alt="Review"
+                          className="w-24 h-24 rounded-md object-cover border"
+                          onLoad={() => console.log("Loaded:", image)}
+                          onError={() => console.log("Failed:", image)}
+                        />
                         <IconButton
                           size="small"
                           color="error"

@@ -18,27 +18,25 @@ import WriteReviews from '../customer/pages/Review/WriteReview'
 import Wishlist from '../customer/pages/Wishlist/Wishlist'
 import { getWishlistByUserId } from '../Redux Toolkit/Customer/WishlistSlice'
 import SearchProducts from '../customer/pages/Search/SearchProducts'
-
 import { useEffect } from 'react'
 
+// ✅ Public seller profile page (customer-facing)
+import SellerProfile from '../customer/pages/Seller/SellerProfile'
+
+// ✅ Customer writes a review for a seller (after delivery)
+import SellerReviewForm from '../customer/pages/Review/SellerReviewForm'
 
 const CustomerRoutes = () => {
+  const dispatch = useAppDispatch();
+  const auth = useAppSelector(state => state.auth);
 
-const dispatch = useAppDispatch();
-const auth = useAppSelector(state => state.auth);
-
-useEffect(() => {
-
-const jwt = auth.jwt || "";
-
-dispatch(fetchUserCart(jwt));
-
-if(jwt){
-dispatch(getWishlistByUserId(jwt));
-}
-
-}, [auth.jwt, dispatch]);
-
+  useEffect(() => {
+    const jwt = auth.jwt || "";
+    dispatch(fetchUserCart(jwt));
+    if (jwt) {
+      dispatch(getWishlistByUserId(jwt));
+    }
+  }, [auth.jwt, dispatch]);
 
   return (
     <>
@@ -54,8 +52,15 @@ dispatch(getWishlistByUserId(jwt));
         <Route path='/wishlist' element={<Wishlist />} />
         <Route path='/checkout/address' element={<Address />} />
         <Route path='/account/*' element={<Profile />} />
-        <Route path='/login' element={<Auth/>} />
-        <Route path='/payment-success' element={<PaymentSuccessHandler/>} />
+        <Route path='/login' element={<Auth />} />
+        <Route path='/payment-success' element={<PaymentSuccessHandler />} />
+
+        {/* ✅ Public seller profile — navigated to from ProductDetails seller name click */}
+        <Route path='/seller/:sellerId' element={<SellerProfile />} />
+
+        {/* ✅ Customer writes a seller review from OrderDetails */}
+        <Route path='/account/seller-review/:sellerId' element={<SellerReviewForm />} />
+
         <Route path='*' element={<NotFound />} />
       </Routes>
       <Footer />

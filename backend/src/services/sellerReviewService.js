@@ -1,56 +1,73 @@
 const SellerReview =
-require(
-"../models/SellerReview"
-);
+    require(
+        "../models/SellerReview"
+    );
 
-class SellerReviewService{
+class SellerReviewService {
 
-async createReview(
-data,
-user
-){
+    async createReview(
+        data,
+        user
+    ) {
 
-const review =
-await SellerReview.create({
+        const existingReview =
+            await SellerReview.findOne({
 
-reviewText:
-data.reviewText,
+                seller: data.sellerId,
 
-rating:
-data.rating,
+                user: user._id
 
-images:
-data.images,
+            });
 
-seller:
-data.sellerId,
+        if (existingReview) {
 
-user:
-user?._id
+            throw new Error(
+                "You have already reviewed this seller"
+            );
 
-});
+        }
 
-return review;
+        const review =
+            await SellerReview.create({
+
+                reviewText:
+                    data.reviewText,
+
+                rating:
+                    data.rating,
+
+                images:
+                    data.images,
+
+                seller:
+                    data.sellerId,
+
+                user:
+                    user?._id
+
+            });
+
+        return review;
+
+    }
+
+
+    async getReviews(
+        sellerId
+    ) {
+
+        return await SellerReview
+            .find({
+                seller: sellerId
+            })
+            .populate(
+                "user",
+                "fullName"
+            );
+
+    }
 
 }
 
-
-async getReviews(
-sellerId
-){
-
-return await SellerReview
-.find({
-seller:sellerId
-})
-.populate(
-"user",
-"fullName"
-);
-
-}
-
-}
-
-module.exports=
-new SellerReviewService();
+module.exports =
+    new SellerReviewService();

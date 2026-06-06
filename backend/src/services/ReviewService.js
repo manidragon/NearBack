@@ -13,6 +13,18 @@ class ReviewService {
         productId
       );
 
+    const existingReview =
+      await Review.findOne({
+        product: product._id,
+        user: user._id,
+      });
+
+    if (existingReview) {
+      throw new Error(
+        "You have already reviewed this product"
+      );
+    }
+
     const review = new Review({
 
       user: user._id,
@@ -34,16 +46,20 @@ class ReviewService {
 
     return Review.findById(
       savedReview._id
-    ).populate("user");
+    )
+      .populate("user")
+      .populate("product");
   }
 
   // ✅ GET REVIEWS BY PRODUCT
   async getReviewsByProductId(productId) {
 
     const reviews =
-      await Review.find({
-        product: productId,
-      }).populate("user");
+  await Review.find({
+    product: productId,
+  })
+    .populate("user")
+    .populate("product");
 
     return reviews;
   }

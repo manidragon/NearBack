@@ -38,7 +38,14 @@ const catalogRoutes = require('./routers/catalogRoutes');
 const returnRoutes = require('./routers/returnRoutes.js');
 const walletRoutes = require('./routers/walletRoutes.js');
 const webhookRoutes = require('./routers/webhookRoutes.js');
+const sellerReviewRoutes =
+require("./routers/sellerReviewRoutes");
 
+
+app.use(
+  "/api/seller-review",
+  sellerReviewRoutes
+);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/returns', returnRoutes);

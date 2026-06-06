@@ -17,6 +17,7 @@ import AddIcon from "@mui/icons-material/Add";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import WarehouseIcon from "@mui/icons-material/Warehouse";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import EmailIcon from "@mui/icons-material/Email";
 
 const menu = [
   {
@@ -31,6 +32,7 @@ const menu = [
     icon: <ShoppingBagIcon className="text-primary-color" />,
     activeIcon: <ShoppingBagIcon className="text-white" />,
   },
+
   {
     name: "Returns",
     path: "/seller/returns",
@@ -79,6 +81,12 @@ const menu = [
     icon: <ReceiptIcon className="text-primary-color" />,
     activeIcon: <ReceiptIcon className="text-white" />,
   },
+  {
+  name: "Enquiries",
+  path: "/seller/enquiries",
+  icon: <EmailIcon className="text-primary-color" />,
+  activeIcon: <EmailIcon className="text-white" />,
+},
 ];
 
 const menu2 = [

@@ -156,7 +156,7 @@ try {
         finalAmount,  // ✅ Use the total amount from frontend
         ordersCount: orders.length
     });
-    
+
     // ✅ Deduct the FULL amount (including platform fee) from wallet
     const updatedWallet = await WalletService.debitWallet(
         user._id,
@@ -166,12 +166,12 @@ try {
         'Order',
         `Payment for ${orders.length} order(s) - Total: ₹${finalAmount}`
     );
-    
+
     console.log('💳 Wallet debited successfully:', {
         amount: finalAmount,
         newBalance: updatedWallet.balance
     });
-    
+
     // Create transaction records for EACH order
     for (const order of orders) {
         try {
@@ -187,22 +187,22 @@ try {
             console.error('⚠️ Failed to create WALLET transaction:', txErr.message);
         }
     }
-    
+
     console.log('💳 Wallet payment successful:', {
         totalDeducted: finalAmount,
         ordersCount: orders.length,
         finalBalance: updatedWallet.balance
     });
-    
+
 } catch (walletError) {
     console.error('❌ Wallet deduction failed:', walletError);
-    
+
     // ❌ CRITICAL: Rollback - Delete created orders if wallet deduction fails
     for (const order of orders) {
         await Order.findByIdAndDelete(order._id);
         console.log('🔄 Rolled back order:', order._id);
     }
-    
+
     return res.status(400).json({
         success: false,
         message: walletError.message || 'Wallet payment failed'

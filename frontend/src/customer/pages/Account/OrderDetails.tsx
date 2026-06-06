@@ -213,8 +213,11 @@ const OrderDetails = () => {
 
   // My product review
   const myReview = reviewState.reviews.find(
-    (review: any) => String(review.user?._id) === String(currentUser?._id)
-  );
+  (review: any) =>
+    String(review.user?._id) === String(currentUser?._id) &&
+    String(review.product?._id || review.product) ===
+      String(item?.product?._id)
+);
 
   // Seller reviews & my seller review
   const sellerReviews = sellerId
@@ -230,9 +233,9 @@ const OrderDetails = () => {
   const sellerRatingAvg =
     sellerRatingCount > 0
       ? (
-          sellerReviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) /
-          sellerRatingCount
-        ).toFixed(1)
+        sellerReviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) /
+        sellerRatingCount
+      ).toFixed(1)
       : null;
 
   const handleCancelOrder = () => {
@@ -247,13 +250,13 @@ const OrderDetails = () => {
   // Helper: Format return status display
   const getReturnStatusDisplay = (status: string) => {
     switch (status) {
-      case 'PENDING':    return { label: 'Pending Approval',          color: '#FFA500' as const };
-      case 'APPROVED':   return { label: 'Approved - Awaiting Pickup', color: '#1E90FF' as const };
-      case 'REJECTED':   return { label: 'Rejected',                  color: '#FF0000' as const };
-      case 'PICKED_UP':  return { label: 'Picked Up - Processing',    color: '#9C27B0' as const };
-      case 'COMPLETED':  return { label: 'Refunded to Wallet',        color: '#32CD32' as const };
-      case 'CANCELLED':  return { label: 'Cancelled',                 color: '#999'    as const };
-      default:           return { label: status,                      color: '#999'    as const };
+      case 'PENDING': return { label: 'Pending Approval', color: '#FFA500' as const };
+      case 'APPROVED': return { label: 'Approved - Awaiting Pickup', color: '#1E90FF' as const };
+      case 'REJECTED': return { label: 'Rejected', color: '#FF0000' as const };
+      case 'PICKED_UP': return { label: 'Picked Up - Processing', color: '#9C27B0' as const };
+      case 'COMPLETED': return { label: 'Refunded to Wallet', color: '#32CD32' as const };
+      case 'CANCELLED': return { label: 'Cancelled', color: '#999' as const };
+      default: return { label: status, color: '#999' as const };
     }
   };
 
@@ -331,11 +334,7 @@ const OrderDetails = () => {
           })()}
         </div>
 
-        <div>
-          <Button onClick={() => navigate(`/reviews/${orders.orderItem?.product?._id}/create`)}>
-            Write Review
-          </Button>
-        </div>
+
       </section>
 
       {/* ── Order Tracking Card ── */}
@@ -387,10 +386,10 @@ const OrderDetails = () => {
                 {showAllUpdates && (
                   <div className="mt-5 border-t pt-5 space-y-5">
                     {[
-                      { label: "Order Confirmed", desc: "Your order has been placed.",      date: order?.orderDate   },
-                      { label: "Shipped",          desc: "Product shipped successfully",     date: order?.updatedAt   },
-                      { label: "Out For Delivery", desc: "Your item is out for delivery",   date: order?.deliverDate },
-                      { label: "Delivered",        desc: "Your item has been delivered",    date: order?.deliverDate },
+                      { label: "Order Confirmed", desc: "Your order has been placed.", date: order?.orderDate },
+                      { label: "Shipped", desc: "Product shipped successfully", date: order?.updatedAt },
+                      { label: "Out For Delivery", desc: "Your item is out for delivery", date: order?.deliverDate },
+                      { label: "Delivered", desc: "Your item has been delivered", date: order?.deliverDate },
                     ].map((step, i, arr) => (
                       <div key={step.label} className="flex gap-4">
                         <div className="flex flex-col items-center">
@@ -433,21 +432,21 @@ const OrderDetails = () => {
                       {isShipped
                         ? "Shipped"
                         : isArriving
-                        ? "Out For Delivery"
-                        : isConfirmed
-                        ? "Packed"
-                        : isPending
-                        ? "Pending"
-                        : "Processing"}
+                          ? "Out For Delivery"
+                          : isConfirmed
+                            ? "Packed"
+                            : isPending
+                              ? "Pending"
+                              : "Processing"}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {isShipped
                         ? "Product shipped successfully"
                         : isArriving
-                        ? "Your item is out for delivery"
-                        : isConfirmed
-                        ? "Your item packed successfully"
-                        : "Order processing"}
+                          ? "Your item is out for delivery"
+                          : isConfirmed
+                            ? "Your item packed successfully"
+                            : "Order processing"}
                     </Typography>
                   </div>
                 </div>
@@ -580,22 +579,25 @@ const OrderDetails = () => {
       )}
 
       {/* ── Cancel Order Button ── */}
-      <div className='p-10'>
-        <Button
-          disabled={orders.currentOrder?.orderStatus === "CANCELLED" || hasPendingReturn}
-          onClick={handleCancelOrder}
-          color='error'
-          sx={{ py: "0.7rem" }}
-          variant='outlined'
-          fullWidth
-        >
-          {hasPendingReturn
-            ? "Return Request Pending"
-            : orders.currentOrder?.orderStatus === "CANCELLED"
-            ? "Order Canceled"
-            : "Cancel Order"}
-        </Button>
-      </div>
+      {!isShipped &&
+        !isDelivered &&
+        !isArriving &&
+        orders.currentOrder?.orderStatus !== "CANCELLED" && (
+          <div className='p-10'>
+            <Button
+              disabled={hasPendingReturn}
+              onClick={handleCancelOrder}
+              color='error'
+              sx={{ py: "0.7rem" }}
+              variant='outlined'
+              fullWidth
+            >
+              {hasPendingReturn
+                ? "Return Request Pending"
+                : "Cancel Order"}
+            </Button>
+          </div>
+        )}
     </Box>
   );
 };

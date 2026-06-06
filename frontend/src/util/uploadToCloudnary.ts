@@ -1,4 +1,4 @@
-// ✅ Enhanced version with multi-file support, error handling, and TypeScript
+
 
 export interface CloudinaryUploadResponse {
   secure_url: string;
@@ -97,9 +97,9 @@ export const uploadMultipleToCloudinary = async (
   files: File[],
   onFileProgress?: (fileName: string, progress: number) => void
 ): Promise<{ successful: string[]; failed: { fileName: string; error: string }[] }> => {
-  
+
   const results = await Promise.allSettled(
-    files.map(file => 
+    files.map(file =>
       // ✅ FIX: Wrap callback to match uploadToCloudinary signature
       uploadToCloudinary(file, (progress) => {
         // Forward progress with fileName to the outer callback
@@ -115,11 +115,11 @@ export const uploadMultipleToCloudinary = async (
 
   results.forEach((result, index) => {
     const fileName = files[index]?.name || `File ${index + 1}`;
-    
+
     if (result.status === 'fulfilled' && result.value.success && result.value.url) {
       successful.push(result.value.url);
     } else {
-      const error = result.status === 'rejected' 
+      const error = result.status === 'rejected'
         ? result.reason?.message || 'Unknown error'
         : result.value?.error || 'Upload failed';
       failed.push({ fileName, error });

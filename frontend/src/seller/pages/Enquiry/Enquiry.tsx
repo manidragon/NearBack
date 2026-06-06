@@ -41,8 +41,8 @@ export default function Enquiry() {
 
       // 2. Load enquiries for that seller
       const enquiryRes = await fetch(
-        `http://localhost:8080/api/enquiry/seller/${seller._id}`
-      );
+  `http://localhost:8080/api/enquiries/seller/${seller._id}`
+);
 
       const enquiryData = await enquiryRes.json();
 
