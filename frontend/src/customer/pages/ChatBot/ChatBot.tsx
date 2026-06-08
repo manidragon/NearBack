@@ -32,7 +32,7 @@ const ChatBot = ({handleClose,productId}:ChatBotProps) => {
             question:prompt
         }))
 
-        setPrompt("") 
+        setPrompt("")
 
         console.log("prompt ", productId, prompt)
     };
@@ -59,7 +59,7 @@ const ChatBot = ({handleClose,productId}:ChatBotProps) => {
                         <IconButton
                         onClick={handleClose}
                         color="primary"
-                        >
+                        >  
                             <CloseIcon/>
                         </IconButton>
                     </div>
